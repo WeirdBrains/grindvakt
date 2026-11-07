@@ -1,4 +1,4 @@
-use grindvakt::config::AppConfig;
+use grindvakt::config::{AppConfig, Provider};
 use grindvakt::dnsclient::{DnsimpleClientExt, build_client};
 use serde_json::json;
 use wiremock::matchers::{body_json, method, path_regex, query_param};
@@ -72,6 +72,7 @@ async fn create_posts_expected_body_once() {
         .await;
 
     let cfg = AppConfig {
+        provider: Provider::Dnsimple,
         account_id: Some(1234),
         zone: "example.com".into(),
         name: "www".into(),
@@ -109,6 +110,7 @@ async fn update_patches_expected_body_once() {
         .mount(&server)
         .await;
     let cfg = AppConfig {
+        provider: Provider::Dnsimple,
         account_id: Some(1234),
         zone: "example.com".into(),
         name: "www".into(),
@@ -152,6 +154,7 @@ async fn pagination_across_pages() {
         .mount(&server)
         .await;
     let cfg = AppConfig {
+        provider: Provider::Dnsimple,
         account_id: Some(1234),
         zone: "example.com".into(),
         name: "@".into(),

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
+use clap::ValueEnum;
 use directories::UserDirs;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -41,7 +43,6 @@ fn home_dir() -> Result<PathBuf> {
 fn default_data_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".grindvakt"))
 }
-
 fn default_credstore_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".config/systemd/user/credstore.encrypted"))
 }
@@ -75,6 +76,25 @@ pub fn write_config_atomic(paths: &ConfigPaths, cfg: &AppConfig) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    Dnsimple,
+    Digitalocean,
+}
+fn default_provider() -> Provider {
+    Provider::Dnsimple
+}
+
+impl fmt::Display for Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Provider::Dnsimple => write!(f, "dnsimple"),
+            Provider::Digitalocean => write!(f, "digitalocean"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Schedule {
     /// Optional: systemd OnCalendar expression
@@ -89,13 +109,16 @@ impl Default for Schedule {
     fn default() -> Self {
         Self {
             calendar: None,
-            interval_secs: Some(300), // default 5m
+            interval_secs: Some(300),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
+    /// Active DNS provider
+    #[serde(default = "default_provider")]
+    pub provider: Provider,
     /// DNSimple account id (whoami preferred when using account token)
     #[serde(default)]
     pub account_id: Option<u64>,
@@ -124,6 +147,7 @@ fn default_ttl() -> u32 {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
+            provider: default_provider(),
             account_id: None,
             zone: "example.com".to_string(),
             name: "@".to_string(),
@@ -151,22 +175,19 @@ impl AppConfig {
         }
         Ok(())
     }
-
     pub fn record_fqdn(&self) -> String {
         normalize_fqdn(&self.zone, &self.name)
     }
 }
 
 pub fn normalize_fqdn(zone: &str, name: &str) -> String {
-    // Normalize: strip trailing dots, handle '@' or empty as apex, and relative labels.
     let z = zone.trim_end_matches('.').to_string();
     let n = name.trim().trim_end_matches('.');
     if n == "@" || n.is_empty() {
         z
     } else if n.ends_with(&z) {
-        // FQDN form; ensure no trailing dot
         n.to_string()
     } else {
-        format!("{}.{}", n, z)
+        format!("{}.", n) + &z
     }
 }

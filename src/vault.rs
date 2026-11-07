@@ -18,6 +18,7 @@ use sha2::Sha256;
 use std::fs;
 use std::io::{Write as IoWrite, stdin, stdout};
 use std::path::Path;
+// Note: no native keychain/DPAPI integration in provider-focused changeset
 
 const VAULT_VERSION: u32 = 1;
 const AAD_CONTEXT: &str = "grindvakt-vault-v1";
@@ -58,9 +59,12 @@ impl Default for KdfParams {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 struct Secrets {
-    dnsimple_token: String,
+    #[serde(default)]
+    dnsimple_token: Option<String>,
+    #[serde(default)]
+    digitalocean_token: Option<String>,
 }
 
 pub struct VaultInitFlow<'a> {
@@ -124,13 +128,43 @@ impl<'a> VaultInitFlow<'a> {
         };
         // TTL
         cfg.ttl = prompt_u32_default("TTL seconds (>=60)", cfg.ttl, 60)?;
-        // Account id (optional) — Enter keeps, '-'/'none' clears, number sets.
-        cfg.account_id = prompt_opt_u64(
-            "DNSimple account id (optional; Enter keeps, '-' to clear)",
-            cfg.account_id,
-        )?;
-        // Sandbox
-        cfg.sandbox = prompt_bool_default("Use DNSimple sandbox?", cfg.sandbox)?;
+        // Select provider before DNSimple-only prompts
+        use crate::config::Provider;
+        loop {
+            let seed = cfg.provider.to_string(); // lowercase
+            let inp = prompt_string_default("Provider (dnsimple|digitalocean)", &seed)?;
+            let t = inp.trim().to_lowercase();
+            if t.is_empty() {
+                break;
+            }
+            match t.as_str() {
+                "dnsimple" => {
+                    cfg.provider = Provider::Dnsimple;
+                    break;
+                }
+                "digitalocean" => {
+                    cfg.provider = Provider::Digitalocean;
+                    break;
+                }
+                _ => {
+                    eprintln!("Unsupported provider. Choose 'dnsimple' or 'digitalocean'.");
+                    continue;
+                }
+            }
+        }
+        // DNSimple-only prompts
+        if let Provider::Dnsimple = cfg.provider {
+            // Account id (optional) — Enter keeps, '-'/'none' clears, number sets.
+            cfg.account_id = prompt_opt_u64(
+                "DNSimple account id (optional; Enter keeps, '-' to clear)",
+                cfg.account_id,
+            )?;
+            // Sandbox
+            cfg.sandbox = prompt_bool_default("Use DNSimple sandbox?", cfg.sandbox)?;
+        } else {
+            cfg.account_id = None;
+            cfg.sandbox = false;
+        }
         // Schedule: choose calendar or interval
         let mut interval: u64 = cfg.schedule.interval_secs.unwrap_or(300);
         let had_existing_calendar = cfg.schedule.calendar.is_some();
@@ -151,17 +185,13 @@ impl<'a> VaultInitFlow<'a> {
             // Reprompt until valid calendar or switch to interval by entering blank.
             loop {
                 let t = cal.trim().to_lowercase();
-                if t.is_empty() {
-                    if had_existing_calendar {
-                        // keep the original existing calendar
-                        break;
-                    } else {
-                        // No existing calendar: Enter means choose interval
-                        interval = prompt_u64_default("Polling interval seconds", interval, 60)?;
-                        cfg.schedule.calendar = None;
-                        cfg.schedule.interval_secs = Some(interval);
-                        break;
-                    }
+                if t.is_empty() && had_existing_calendar {
+                    break;
+                } else if t.is_empty() && !had_existing_calendar {
+                    interval = prompt_u64_default("Polling interval seconds", interval, 60)?;
+                    cfg.schedule.calendar = None;
+                    cfg.schedule.interval_secs = Some(interval);
+                    break;
                 }
                 if t == "-" || t == "none" {
                     interval = prompt_u64_default("Polling interval seconds", interval, 60)?;
@@ -187,6 +217,7 @@ impl<'a> VaultInitFlow<'a> {
         println!("\nAbout to write config:");
         println!("  Zone: {}", cfg.zone);
         println!("  Name: {}", cfg.name);
+        println!("  Provider: {}", cfg.provider);
         println!("  TTL: {}", cfg.ttl);
         println!(
             "  Schedule: {}",
@@ -195,20 +226,26 @@ impl<'a> VaultInitFlow<'a> {
                 .clone()
                 .unwrap_or_else(|| format!("every {}s", cfg.schedule.interval_secs.unwrap_or(0)))
         );
-        println!(
-            "  Account id: {}",
-            cfg.account_id
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| "auto".to_string())
-        );
-        println!("  Sandbox: {}", cfg.sandbox);
+        if let Provider::Dnsimple = cfg.provider {
+            println!(
+                "  Account id: {}",
+                cfg.account_id
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "auto".to_string())
+            );
+            println!("  Sandbox: {}", cfg.sandbox);
+        }
         let ok = prompt_bool_default("Proceed with these settings?", true)?;
         if !ok {
             bail!("aborted by user");
         }
 
         // Prompt for token and password
-        let token = prompt_secret("Enter DNSimple API token: ")?;
+        let token_prompt = match cfg.provider {
+            Provider::Dnsimple => "Enter DNSimple API token: ",
+            Provider::Digitalocean => "Enter DigitalOcean API token: ",
+        };
+        let token = prompt_secret(token_prompt)?;
         let password = prompt_secret("Set a password to protect your vault: ")?;
         let password_confirm = prompt_secret("Confirm password: ")?;
         if password.expose_secret() != password_confirm.expose_secret() {
@@ -243,9 +280,16 @@ impl<'a> VaultInitFlow<'a> {
         let recovery_key = derive_hkdf_from_mnemonic(&mnemonic, &salt_recovery);
         let dek_wrapped_by_recovery = aead_seal(&recovery_key, &dek, AAD_CONTEXT.as_bytes())?;
 
-        // Encrypt secrets with DEK
-        let secrets = Secrets {
-            dnsimple_token: token.expose_secret().clone(),
+        // Encrypt secrets with DEK (canonical shape; preserves future additional providers)
+        let secrets = match cfg.provider {
+            Provider::Dnsimple => Secrets {
+                dnsimple_token: Some(token.expose_secret().clone()),
+                digitalocean_token: None,
+            },
+            Provider::Digitalocean => Secrets {
+                dnsimple_token: None,
+                digitalocean_token: Some(token.expose_secret().clone()),
+            },
         };
         let secrets_json = serde_json::to_vec(&secrets)?;
         let (secrets_aead_nonce, secrets_aead_ciphertext) =
@@ -397,7 +441,151 @@ fn unlock_with_dek(paths: &ConfigPaths, dek: &[u8]) -> Result<SecretString> {
         )
         .map_err(|e| anyhow::anyhow!("decrypt secrets: {}", e))?;
     let s: Secrets = serde_json::from_slice(&plaintext)?;
-    Ok(SecretString::new(s.dnsimple_token))
+    let tok = s
+        .dnsimple_token
+        .ok_or_else(|| anyhow::anyhow!("dnsimple token not set in vault"))?;
+    Ok(SecretString::new(tok))
+}
+
+use crate::config::Provider;
+
+pub async fn unlock_token_for_provider_interactive(
+    ctx: UnlockContext<'_>,
+    provider: Provider,
+) -> Result<SecretString> {
+    if ctx.allow_unattended
+        && let Ok(dir) = std::env::var("CREDENTIALS_DIRECTORY")
+    {
+        let p = std::path::Path::new(&dir).join(CREDENTIAL_NAME);
+        if p.exists()
+            && let Ok(dek) = std::fs::read(&p)
+            && dek.len() == 32
+        {
+            return unlock_provider_with_dek(ctx.paths, &dek, provider);
+        }
+    }
+    let vault = load_vault(&ctx.paths.vault_file)?;
+    check_vault_supported(&vault)?;
+    let pwd = prompt_secret("Vault password: ")?;
+    let salt = B64.decode(&vault.salt_password)?;
+    let kdf = vault.kdf.clone();
+    let key = derive_argon2_key(&pwd, &salt, &kdf)?;
+    let wrapped = B64.decode(&vault.dek_wrapped_by_password)?;
+    let dek = aead_open(&key, &wrapped, AAD_CONTEXT.as_bytes())
+        .map_err(|e| anyhow::anyhow!("unlock failed: {}", e))?;
+    unlock_provider_with_dek(ctx.paths, &dek, provider)
+}
+
+fn unlock_provider_with_dek(
+    paths: &ConfigPaths,
+    dek: &[u8],
+    provider: Provider,
+) -> Result<SecretString> {
+    let vault = load_vault(&paths.vault_file)?;
+    check_vault_supported(&vault)?;
+    let nonce = B64.decode(&vault.secrets_aead_nonce)?;
+    let ct = B64.decode(&vault.secrets_aead_ciphertext)?;
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(dek));
+    let pt = cipher
+        .decrypt(
+            XNonce::from_slice(&nonce),
+            chacha20poly1305::aead::Payload {
+                msg: &ct,
+                aad: AAD_CONTEXT.as_bytes(),
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("decrypt secrets: {}", e))?;
+    let comp: Secrets =
+        serde_json::from_slice(&pt).map_err(|e| anyhow::anyhow!("parse secrets: {}", e))?;
+    let out = match provider {
+        Provider::Dnsimple => comp.dnsimple_token.ok_or_else(|| {
+            anyhow::anyhow!("dnsimple token not set; run `grindvakt provider token set dnsimple`")
+        })?,
+        Provider::Digitalocean => comp.digitalocean_token.ok_or_else(|| {
+            anyhow::anyhow!(
+                "digitalocean token not set; run `grindvakt provider token set digitalocean`"
+            )
+        })?,
+    };
+    Ok(SecretString::new(out))
+}
+
+pub struct TokenStatus {
+    pub dnsimple: bool,
+    pub digitalocean: bool,
+}
+
+pub async fn tokens_status_interactive(paths: &ConfigPaths) -> Result<TokenStatus> {
+    let vault = load_vault(&paths.vault_file)?;
+    let pwd = prompt_secret("Vault password: ")?;
+    let salt = B64.decode(&vault.salt_password)?;
+    let kdf = vault.kdf.clone();
+    let key = derive_argon2_key(&pwd, &salt, &kdf)?;
+    let wrapped = B64.decode(&vault.dek_wrapped_by_password)?;
+    let dek = aead_open(&key, &wrapped, AAD_CONTEXT.as_bytes())?;
+    let nonce = B64.decode(&vault.secrets_aead_nonce)?;
+    let ct = B64.decode(&vault.secrets_aead_ciphertext)?;
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(&dek));
+    let pt = cipher
+        .decrypt(
+            XNonce::from_slice(&nonce),
+            chacha20poly1305::aead::Payload {
+                msg: &ct,
+                aad: AAD_CONTEXT.as_bytes(),
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("decrypt secrets: {}", e))?;
+    let comp: Secrets =
+        serde_json::from_slice(&pt).map_err(|e| anyhow::anyhow!("parse secrets: {}", e))?;
+    Ok(TokenStatus {
+        dnsimple: comp.dnsimple_token.is_some(),
+        digitalocean: comp.digitalocean_token.is_some(),
+    })
+}
+
+pub async fn set_provider_token_interactive(paths: &ConfigPaths, provider: Provider) -> Result<()> {
+    let vault = load_vault(&paths.vault_file)?;
+    let pwd = prompt_secret("Vault password: ")?;
+    let salt = B64.decode(&vault.salt_password)?;
+    let kdf = vault.kdf.clone();
+    let key = derive_argon2_key(&pwd, &salt, &kdf)?;
+    let wrapped = B64.decode(&vault.dek_wrapped_by_password)?;
+    let dek = aead_open(&key, &wrapped, AAD_CONTEXT.as_bytes())?;
+    let nonce = B64.decode(&vault.secrets_aead_nonce)?;
+    let ct = B64.decode(&vault.secrets_aead_ciphertext)?;
+    let cipher = XChaCha20Poly1305::new(Key::from_slice(&dek));
+    let pt = cipher
+        .decrypt(
+            XNonce::from_slice(&nonce),
+            chacha20poly1305::aead::Payload {
+                msg: &ct,
+                aad: AAD_CONTEXT.as_bytes(),
+            },
+        )
+        .map_err(|e| anyhow::anyhow!("decrypt secrets: {}", e))?;
+    // Parse must succeed; do not overwrite on parse errors
+    let mut comp: Secrets =
+        serde_json::from_slice(&pt).map_err(|e| anyhow::anyhow!("parse secrets: {}", e))?;
+    let label = match provider {
+        Provider::Dnsimple => "Enter DNSimple API token: ",
+        Provider::Digitalocean => "Enter DigitalOcean API token: ",
+    };
+    let tok = prompt_secret(label)?;
+    let val = tok.expose_secret().clone();
+    match provider {
+        Provider::Dnsimple => comp.dnsimple_token = Some(val),
+        Provider::Digitalocean => comp.digitalocean_token = Some(val),
+    }
+    // Serialize back to canonical shape
+    let updated = serde_json::to_vec(&comp)?;
+    let (n2, ct2) = aead_encrypt_detached(&dek, &updated, AAD_CONTEXT.as_bytes())?;
+    let mut v = vault;
+    v.secrets_aead_nonce = B64.encode(n2);
+    v.secrets_aead_ciphertext = B64.encode(ct2);
+    let text = serde_json::to_string_pretty(&v)?;
+    atomic_write_0600(&paths.vault_file, text.as_bytes())?;
+    println!("Token updated for {:?}", provider);
+    Ok(())
 }
 
 pub struct CredentialEnrollment<'a> {
@@ -887,6 +1075,102 @@ mod tests {
     }
 
     #[test]
+    fn legacy_and_dual_provider_secrets_parse() {
+        use crate::config::Provider;
+        // Setup temp vault
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path();
+        let paths = ConfigPaths {
+            data_dir: base.to_path_buf(),
+            config_file: base.join("config.toml"),
+            vault_file: base.join("vault.json"),
+            credstore_dir: base.join("credstore.encrypted"),
+        };
+        // Common wrapping
+        let password = SecretString::new("pw".into());
+        let mut salt_pwd = [0u8; 16];
+        rand::rngs::OsRng.fill_bytes(&mut salt_pwd);
+        let mut salt_rec = [0u8; 16];
+        rand::rngs::OsRng.fill_bytes(&mut salt_rec);
+        let mut entropy = [0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut entropy);
+        let m = Mnemonic::from_entropy_in(Language::English, &entropy).unwrap();
+        // Case 1: legacy dnsimple-only secrets
+        let dek1 = random_bytes(32);
+        let key_pwd1 = derive_argon2_key(&password, &salt_pwd, &KdfParams::default()).unwrap();
+        let wrap_pwd1 = aead_seal(&key_pwd1, &dek1, AAD_CONTEXT.as_bytes()).unwrap();
+        let key_rec1 = derive_hkdf_from_mnemonic(&m, &salt_rec);
+        let wrap_rec1 = aead_seal(&key_rec1, &dek1, AAD_CONTEXT.as_bytes()).unwrap();
+        let (n1, ct1) = aead_encrypt_detached(
+            &dek1,
+            br#"{"dnsimple_token":"tok_DNS"}"#,
+            AAD_CONTEXT.as_bytes(),
+        )
+        .unwrap();
+        let v1 = VaultFile {
+            version: VAULT_VERSION,
+            kdf: KdfParams::default(),
+            salt_password: B64.encode(salt_pwd),
+            salt_recovery: B64.encode(salt_rec),
+            dek_wrapped_by_password: B64.encode(wrap_pwd1.clone()),
+            dek_wrapped_by_recovery: B64.encode(wrap_rec1.clone()),
+            secrets_aead_nonce: B64.encode(n1),
+            secrets_aead_ciphertext: B64.encode(ct1),
+            created_unix: 0,
+        };
+        fs::create_dir_all(&paths.data_dir).unwrap();
+        fs::write(&paths.vault_file, serde_json::to_vec(&v1).unwrap()).unwrap();
+        // Unlock via password path and read provider-specific tokens
+        let dek_open1 = aead_open(
+            &key_pwd1,
+            &B64.decode(&v1.dek_wrapped_by_password).unwrap(),
+            AAD_CONTEXT.as_bytes(),
+        )
+        .unwrap();
+        let t_dns =
+            super::unlock_provider_with_dek(&paths, &dek_open1, Provider::Dnsimple).unwrap();
+        assert_eq!(t_dns.expose_secret(), "tok_DNS");
+        let do_err = super::unlock_provider_with_dek(&paths, &dek_open1, Provider::Digitalocean);
+        assert!(do_err.is_err());
+
+        // Case 2: digitalocean-only secrets
+        let dek2 = random_bytes(32);
+        let key_pwd2 = derive_argon2_key(&password, &salt_pwd, &KdfParams::default()).unwrap();
+        let wrap_pwd2 = aead_seal(&key_pwd2, &dek2, AAD_CONTEXT.as_bytes()).unwrap();
+        let key_rec2 = derive_hkdf_from_mnemonic(&m, &salt_rec);
+        let wrap_rec2 = aead_seal(&key_rec2, &dek2, AAD_CONTEXT.as_bytes()).unwrap();
+        let (n2, ct2) = aead_encrypt_detached(
+            &dek2,
+            br#"{"dnsimple_token":null,"digitalocean_token":"tok_DO"}"#,
+            AAD_CONTEXT.as_bytes(),
+        )
+        .unwrap();
+        let v2 = VaultFile {
+            version: VAULT_VERSION,
+            kdf: KdfParams::default(),
+            salt_password: B64.encode(salt_pwd),
+            salt_recovery: B64.encode(salt_rec),
+            dek_wrapped_by_password: B64.encode(wrap_pwd2.clone()),
+            dek_wrapped_by_recovery: B64.encode(wrap_rec2.clone()),
+            secrets_aead_nonce: B64.encode(n2),
+            secrets_aead_ciphertext: B64.encode(ct2),
+            created_unix: 0,
+        };
+        fs::write(&paths.vault_file, serde_json::to_vec(&v2).unwrap()).unwrap();
+        let dek_open2 = aead_open(
+            &key_pwd2,
+            &B64.decode(&v2.dek_wrapped_by_password).unwrap(),
+            AAD_CONTEXT.as_bytes(),
+        )
+        .unwrap();
+        let t_do =
+            super::unlock_provider_with_dek(&paths, &dek_open2, Provider::Digitalocean).unwrap();
+        assert_eq!(t_do.expose_secret(), "tok_DO");
+        let dns_err = super::unlock_provider_with_dek(&paths, &dek_open2, Provider::Dnsimple);
+        assert!(dns_err.is_err());
+    }
+
+    #[test]
     fn validate_fqdn_and_calendar_helpers() {
         // FQDN checks
         assert!(super::is_valid_fqdn("example.com"));
@@ -901,3 +1185,5 @@ mod tests {
         assert!(!super::validate_calendar("line\nbreak"));
     }
 }
+
+// No Windows DPAPI helper in this focused provider changeset

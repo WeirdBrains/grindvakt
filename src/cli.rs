@@ -1,11 +1,14 @@
-use crate::config::{self, AppConfig, ConfigPaths};
-use crate::dnsclient::{DnsAction, DnsimpleClientExt};
+use crate::config::{self, AppConfig, ConfigPaths, Provider};
+use crate::dnsclient::DnsAction;
 use crate::ip::PublicIpConsensus;
 use crate::service::{InstallUnits, render_units_with};
-use crate::vault::{ChangePasswordFlow, CredentialEnrollment, RecoverFlow, VaultInitFlow};
+use crate::vault::{
+    ChangePasswordFlow, CredentialEnrollment, RecoverFlow, VaultInitFlow,
+    set_provider_token_interactive, tokens_status_interactive,
+    unlock_token_for_provider_interactive,
+};
 use anyhow::{Context, Result, bail};
 use clap::{Args as ClapArgs, Parser, Subcommand};
-use secrecy::ExposeSecret;
 use std::path::PathBuf;
 use tracing::info;
 
@@ -22,6 +25,11 @@ pub struct Args {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
+    /// Manage active DNS provider and tokens
+    Provider {
+        #[command(subcommand)]
+        cmd: ProviderCmd,
+    },
     /// Interactively create initial config and encrypted vault
     Init(Init),
     /// Sync A record to current public IPv4 (idempotent). Never writes with --dry-run
@@ -96,24 +104,17 @@ impl Sync {
         let _lock =
             crate::lock::SingleInstanceLock::acquire(&format!("sync-{}", cfg.record_fqdn()))?;
 
-        let consensus = PublicIpConsensus::default();
-        let ip = consensus.resolve().await.context("resolve public IPv4")?;
-
         let ctx = crate::vault::UnlockContext {
             paths: &paths,
             allow_unattended: !self.no_unattended,
         };
-        let token = crate::vault::unlock_token_interactive(ctx).await?;
-
-        let client = crate::dnsclient::build_client(
-            cfg.sandbox,
-            token.expose_secret().clone(),
-            cfg.api_base_url.clone(),
-        )?;
-        let account_id = crate::dnsclient::resolve_account_id(&client, cfg.account_id).await?;
-
-        let action = client
-            .plan_sync_action(&cfg, account_id, ip)
+        let token = unlock_token_for_provider_interactive(ctx, cfg.provider.clone()).await?;
+        let provider = crate::provider::build_active_provider(&cfg, &token).await?;
+        // Resolve public IP after verifying credentials to fail early on missing tokens
+        let consensus = PublicIpConsensus::default();
+        let ip = consensus.resolve().await.context("resolve public IPv4")?;
+        let action = provider
+            .plan_sync_action(&cfg, ip)
             .await
             .context("plan dns action")?;
 
@@ -130,8 +131,8 @@ impl Sync {
                         ttl
                     );
                 } else {
-                    client
-                        .create_a_record(account_id, &cfg, name, ip, ttl)
+                    provider
+                        .create_a_record(&cfg, name, ip, ttl)
                         .await
                         .context("create a record")?;
                     info!("Created A {} = {} (ttl={})", cfg.record_fqdn(), ip, ttl);
@@ -152,8 +153,8 @@ impl Sync {
                         record_id
                     );
                 } else {
-                    client
-                        .update_a_record(account_id, &cfg, record_id, ip, ttl)
+                    provider
+                        .update_a_record(&cfg, record_id, ip, ttl)
                         .await
                         .context("update a record")?;
                     info!(
@@ -173,6 +174,87 @@ impl Sync {
     }
 }
 
+#[derive(Subcommand, Debug)]
+pub enum ProviderCmd {
+    /// Show current active provider
+    Current {
+        #[command(flatten)]
+        common: Common,
+    },
+    /// Set the active provider
+    Set {
+        #[command(flatten)]
+        common: Common,
+        #[arg(value_enum)]
+        to: Provider,
+    },
+    /// List supported providers and token status (prompts to unlock vault)
+    List {
+        #[command(flatten)]
+        common: Common,
+    },
+    /// Manage provider tokens
+    Token {
+        #[command(subcommand)]
+        cmd: ProviderTokenCmd,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProviderTokenCmd {
+    /// Set or replace the token for a provider (stored encrypted in the vault)
+    Set {
+        #[command(flatten)]
+        common: Common,
+        #[arg(value_enum)]
+        provider: Provider,
+    },
+}
+
+impl ProviderCmd {
+    pub async fn run(self) -> Result<()> {
+        match self {
+            ProviderCmd::Current { common } => {
+                let paths = ConfigPaths::resolve(common.data_dir.as_deref())?;
+                let cfg = config::load_or_init_config(&paths)?;
+                println!("{}", cfg.provider);
+                Ok(())
+            }
+            ProviderCmd::Set { common, to } => {
+                let paths = ConfigPaths::resolve(common.data_dir.as_deref())?;
+                let mut cfg = config::load_or_init_config(&paths)?;
+                cfg.provider = to;
+                config::write_config_atomic(&paths, &cfg)?;
+                println!("Active provider set to {}", cfg.provider);
+                Ok(())
+            }
+            ProviderCmd::List { common } => {
+                let paths = ConfigPaths::resolve(common.data_dir.as_deref())?;
+                let status = tokens_status_interactive(&paths).await?;
+                let cur = config::load_or_init_config(&paths)?.provider;
+                println!(
+                    "supported: dnsimple, digitalocean
+current: {}
+tokens: dnsimple = {}, digitalocean = {}",
+                    cur,
+                    if status.dnsimple { "set" } else { "missing" },
+                    if status.digitalocean {
+                        "set"
+                    } else {
+                        "missing"
+                    }
+                );
+                Ok(())
+            }
+            ProviderCmd::Token { cmd } => match cmd {
+                ProviderTokenCmd::Set { common, provider } => {
+                    let paths = ConfigPaths::resolve(common.data_dir.as_deref())?;
+                    set_provider_token_interactive(&paths, provider).await
+                }
+            },
+        }
+    }
+}
 #[derive(ClapArgs, Debug)]
 pub struct Recover {
     #[command(flatten)]
@@ -261,3 +343,4 @@ impl EnrollCredential {
         CredentialEnrollment::new(&paths).enroll(&cfg).await
     }
 }
+// No Windows service subcommands in this focused provider changeset

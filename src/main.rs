@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
     match args.command {
         cli::Command::Init(cmd) => cmd.run().await,
         cli::Command::Sync(cmd) => cmd.run().await,
+        cli::Command::Provider { cmd } => cmd.run().await,
         cli::Command::Recover(cmd) => cmd.run().await,
         cli::Command::ChangePassword(cmd) => cmd.run().await,
         cli::Command::Service { cmd } => cmd.run().await,

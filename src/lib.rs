@@ -4,5 +4,6 @@ pub mod dnsclient;
 pub mod fsutil;
 pub mod ip;
 pub mod lock;
+pub mod provider;
 pub mod service;
 pub mod vault;
