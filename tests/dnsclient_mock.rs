@@ -1,4 +1,4 @@
-use grindvakt::config::AppConfig;
+use grindvakt::config::{AppConfig, Provider};
 use grindvakt::dnsclient::{DnsAction, DnsimpleClientExt, build_client};
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -55,6 +55,7 @@ async fn plan_noop_when_matching_record_exists() {
         .await;
 
     let cfg = AppConfig {
+        provider: Provider::Dnsimple,
         account_id: Some(1234),
         zone: "example.com".into(),
         name: "@".into(),
@@ -92,6 +93,7 @@ async fn plan_create_when_none_exists() {
         .mount(&server)
         .await;
     let cfg = AppConfig {
+        provider: Provider::Dnsimple,
         account_id: Some(1234),
         zone: "example.com".into(),
         name: "www".into(),
@@ -133,6 +135,7 @@ async fn plan_ambiguous_on_duplicates() {
         .mount(&server)
         .await;
     let cfg = AppConfig {
+        provider: Provider::Dnsimple,
         account_id: Some(1234),
         zone: "example.com".into(),
         name: "www".into(),

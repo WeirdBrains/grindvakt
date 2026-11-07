@@ -1,6 +1,6 @@
 ### grindvakt
 
-Secure, user-mode DNS updater for DNSimple. Rust CLI with:
+Secure, user-mode DNS updater for DNSimple and DigitalOcean. Rust CLI with:
 - Public IPv4 discovery via multiple HTTPS sources and consensus
 - Idempotent A record create/update/noop on DNSimple (official crate)
 - Local encrypted vault under `~/.grindvakt` with password unlock and 24‑word recovery
@@ -17,7 +17,7 @@ Quick start (development)
   - Cleanup after each run: `rm -rf \"$CARGO_TARGET_DIR\"`
 
 Initialize local config and vault
-- `grindvakt init` (prompts for DNSimple token, password, and emits a one-time 24-word recovery phrase — record it securely).
+- `grindvakt init` (prompts for provider selection, that provider's API token, password, and emits a one-time 24-word recovery phrase — record it securely).
 - Config file: `~/.grindvakt/config.toml`
 - Vault: `~/.grindvakt/vault.json` (encrypted; never edit by hand)
 
@@ -33,7 +33,7 @@ Install user service without enabling
   - `systemctl --user enable --now grindvakt.timer`
 
 Important security limits
-- The vault encrypts the DNSimple token using a random DEK (XChaCha20-Poly1305). The DEK is wrapped independently by an Argon2id key (from your password) and by an HKDF-SHA256 key (from your 24-word recovery). Recovery unlocks the existing vault to reset the password; losing both vault + recovery requires reissuing the token.
+- The vault encrypts provider tokens using a random DEK (XChaCha20-Poly1305). The DEK is wrapped independently by an Argon2id key (from your password) and by an HKDF-SHA256 key (from your 24-word recovery). Recovery unlocks the existing vault to reset the password; losing both vault + recovery requires reissuing the token.
 - Files and directory permissions are enforced (0700 dir, 0600 files) with atomic write + fsync+rename.
 - No secrets on command line, env, or logs. Password prompts require a local terminal/TTY.
 - Unattended mode (systemd-creds) decrypts on this machine+user once enrolled; changing only the password does not revoke the sealed DEK. Use the provided rewrap/rotation commands to revoke and reseal.
@@ -50,3 +50,13 @@ Testing and validation (not run in cloud)
 License
 - Private draft. Not for redistribution.
 
+
+
+## Providers
+
+- Show current provider: `grindvakt provider current`
+- Set provider: `grindvakt provider set dnsimple|digitalocean`
+- List providers and token status: `grindvakt provider list` (prompts to unlock vault)
+- Set provider token: `grindvakt provider token set dnsimple|digitalocean`
+
+Security: tokens are encrypted in the vault; migrations preserve existing DNSimple tokens. Switching providers retains both tokens. No secrets are printed or stored on argv/env.

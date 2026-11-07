@@ -1,10 +1,11 @@
-use grindvakt::config::{AppConfig, Schedule};
+use grindvakt::config::{AppConfig, Provider, Schedule};
 use grindvakt::service::render_units_with;
 use std::path::PathBuf;
 
 #[test]
 fn render_timer_interval() {
     let cfg = AppConfig {
+        provider: Provider::Dnsimple,
         account_id: None,
         zone: "example.com".into(),
         name: "@".into(),
@@ -35,6 +36,7 @@ fn render_timer_interval() {
 #[test]
 fn render_timer_calendar() {
     let cfg = AppConfig {
+        provider: Provider::Dnsimple,
         account_id: None,
         zone: "example.com".into(),
         name: "www".into(),

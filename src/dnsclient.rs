@@ -296,6 +296,7 @@ mod tests {
     #[test]
     fn test_relative_name() {
         let cfg = AppConfig {
+            provider: crate::config::Provider::Dnsimple,
             account_id: None,
             zone: "example.com".into(),
             name: "@".into(),
