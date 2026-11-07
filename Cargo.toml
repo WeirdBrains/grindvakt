@@ -1,6 +1,6 @@
 [package]
 name = "grindvakt"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.89"
 description = "Grindvakt — a user-mode DNS updater for DNSimple with secure local vault and systemd user timer"
@@ -70,6 +70,9 @@ chacha20poly1305 = "0.10"
 rpassword = "7.3"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"
 
 [dev-dependencies]
 assert_fs = "1.1"

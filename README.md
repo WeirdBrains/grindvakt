@@ -5,6 +5,7 @@ Secure, user-mode DNS updater for DNSimple and DigitalOcean. Rust CLI with:
 - Idempotent A record create/update/noop on DNSimple (official crate)
 - Local encrypted vault under `~/.grindvakt` with password unlock and 24‑word recovery
 - systemd --user oneshot service + configurable timer (no root/system units)
+- macOS launchd per-user agent (no autoload; install via CLI)
 
 No web UI. No background daemons installed automatically. No live DNS or service changes unless you run commands explicitly (supports `--dry-run`).
 
@@ -25,19 +26,20 @@ Sync once (no writes)
 - `grindvakt sync --dry-run`
 
 Install user service without enabling
-- Print units: `grindvakt service print`
-- Install units: `grindvakt service install`
-- Optional unattended credential enrollment using TPM2-bound systemd-creds:
-  - `grindvakt service enroll-credential` (prompts for password; seals the DEK, not the password)
-- To enable timer later (requires active user manager; linger remains unchanged):
+- Print service/agent: `grindvakt service print`
+- Install service/agent: `grindvakt service install`
+- Optional unattended credential enrollment:
+  - Linux: TPM2-bound systemd-creds — `grindvakt service enroll-credential` (prompts for password; seals the DEK, not the password)
+  - macOS: Keychain generic password (service=grindvakt, account=grindvakt.dek) — `grindvakt service enroll-credential`
+- To enable timer later on Linux (requires active user manager; linger remains unchanged):
   - `systemctl --user enable --now grindvakt.timer`
 
 Important security limits
 - The vault encrypts provider tokens using a random DEK (XChaCha20-Poly1305). The DEK is wrapped independently by an Argon2id key (from your password) and by an HKDF-SHA256 key (from your 24-word recovery). Recovery unlocks the existing vault to reset the password; losing both vault + recovery requires reissuing the token.
 - Files and directory permissions are enforced (0700 dir, 0600 files) with atomic write + fsync+rename.
 - No secrets on command line, env, or logs. Password prompts require a local terminal/TTY.
-- Unattended mode (systemd-creds) decrypts on this machine+user once enrolled; changing only the password does not revoke the sealed DEK. Use the provided rewrap/rotation commands to revoke and reseal.
-- Timers do not run when the user manager is not running (linger stays OFF).
+- Unattended mode: on Linux (systemd-creds) or macOS (Keychain). Changing only the password does not revoke the sealed DEK; use rewrap/rotation to revoke and reseal.
+- Timers do not run when the user manager is not running (linger stays OFF). On macOS, launch agents are per-user and not auto-loaded by the installer.
 - KDF defaults: Argon2id with 64 MiB memory, 3 iterations, p=1; bounded and validated at load.
 
 Testing and validation (not run in cloud)
@@ -60,3 +62,9 @@ License
 - Set provider token: `grindvakt provider token set dnsimple|digitalocean`
 
 Security: tokens are encrypted in the vault; migrations preserve existing DNSimple tokens. Switching providers retains both tokens. No secrets are printed or stored on argv/env.
+
+macOS service
+- Print agent: `grindvakt service print` (shows the user LaunchAgent .plist)
+- Install agent: `grindvakt service install` (writes to `~/Library/LaunchAgents/com.weirdbrains.grindvakt.plist`, does not load/enable)
+- Load later: `launchctl load ~/Library/LaunchAgents/com.weirdbrains.grindvakt.plist`
+- Logs: `~/Library/Logs/Grindvakt/{grindvakt.out.log,grindvakt.err.log}` after load.

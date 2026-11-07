@@ -1,7 +1,7 @@
 use crate::config::{self, AppConfig, ConfigPaths, Provider};
 use crate::dnsclient::DnsAction;
 use crate::ip::PublicIpConsensus;
-use crate::service::{InstallUnits, render_units_with};
+use crate::service::InstallUnits;
 use crate::vault::{
     ChangePasswordFlow, CredentialEnrollment, RecoverFlow, VaultInitFlow,
     set_provider_token_interactive, tokens_status_interactive,
@@ -309,8 +309,16 @@ impl PrintService {
         let paths = ConfigPaths::resolve(self.common.data_dir.as_deref())?;
         let cfg = config::load_or_init_config(&paths)?;
         let exe = std::env::current_exe().context("resolve current executable")?;
-        let rendered = render_units_with(&cfg, &exe, &paths.data_dir)?;
-        println!("{}\n\n{}", rendered.service_unit, rendered.timer_unit);
+        #[cfg(target_os = "linux")]
+        {
+            let rendered = crate::service::render_units_with(&cfg, &exe, &paths.data_dir)?;
+            println!("{}\n\n{}", rendered.service_unit, rendered.timer_unit);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let rendered = crate::service::render_launchd_with(&cfg, &exe, &paths.data_dir)?;
+            println!("{}", rendered.plist);
+        }
         Ok(())
     }
 }

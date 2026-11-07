@@ -464,6 +464,15 @@ pub async fn unlock_token_for_provider_interactive(
             return unlock_provider_with_dek(ctx.paths, &dek, provider);
         }
     }
+    // On macOS, also try Keychain generic password (service=grindvakt, account=grindvakt.dek)
+    #[cfg(target_os = "macos")]
+    if ctx.allow_unattended
+        && let Ok(data) =
+            security_framework::passwords::get_generic_password("grindvakt", "grindvakt.dek")
+        && data.len() == 32
+    {
+        return unlock_provider_with_dek(ctx.paths, &data, provider);
+    }
     let vault = load_vault(&ctx.paths.vault_file)?;
     check_vault_supported(&vault)?;
     let pwd = prompt_secret("Vault password: ")?;
@@ -595,6 +604,7 @@ impl<'a> CredentialEnrollment<'a> {
     pub fn new(paths: &'a ConfigPaths) -> Self {
         Self { paths }
     }
+    #[cfg(target_os = "linux")]
     pub async fn enroll(&self, _cfg: &AppConfig) -> Result<()> {
         let vault = load_vault(&self.paths.vault_file)?;
         let pwd = prompt_secret("Vault password (to access DEK): ")?;
@@ -637,6 +647,29 @@ impl<'a> CredentialEnrollment<'a> {
             dest_file.display()
         );
         Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    pub async fn enroll(&self, _cfg: &AppConfig) -> Result<()> {
+        let vault = load_vault(&self.paths.vault_file)?;
+        let pwd = prompt_secret("Vault password (to access DEK): ")?;
+        let salt = B64.decode(&vault.salt_password)?;
+        let kdf = vault.kdf.clone();
+        let key = derive_argon2_key(&pwd, &salt, &kdf)?;
+        let wrapped = B64.decode(&vault.dek_wrapped_by_password)?;
+        let dek = aead_open(&key, &wrapped, AAD_CONTEXT.as_bytes()).context("unlock failed")?;
+        if dek.len() != 32 {
+            bail!("unexpected DEK length");
+        }
+        security_framework::passwords::set_generic_password("grindvakt", "grindvakt.dek", &dek)
+            .context("store DEK in Keychain")?;
+        println!(
+            "Enrolled unattended credential in Keychain (service=grindvakt, account=grindvakt.dek)"
+        );
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub async fn enroll(&self, _cfg: &AppConfig) -> Result<()> {
+        bail!("unattended credential enrollment unsupported on this OS");
     }
 }
 

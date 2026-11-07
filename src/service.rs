@@ -2,18 +2,27 @@ use crate::config::AppConfig;
 use crate::fsutil::ensure_dir_0700;
 use anyhow::{Context, Result, bail};
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "linux")]
 const SERVICE_NAME: &str = "grindvakt.service";
+#[cfg(target_os = "linux")]
 const TIMER_NAME: &str = "grindvakt.timer";
+#[cfg(target_os = "linux")]
 const CREDENTIAL_NAME: &str = "grindvakt.dek";
 
+#[cfg(target_os = "macos")]
+const LAUNCHD_LABEL: &str = "com.weirdbrains.grindvakt";
+
+#[cfg(target_os = "linux")]
 pub struct ServiceRender {
     pub service_unit: String,
     pub timer_unit: String,
 }
 
+#[cfg(target_os = "linux")]
 pub fn render_units_with(
     cfg: &AppConfig,
     exe_path: &Path,
@@ -79,6 +88,101 @@ pub fn render_units_with(
     })
 }
 
+#[cfg(target_os = "macos")]
+pub struct LaunchdRender {
+    pub plist: String,
+}
+
+#[cfg(target_os = "macos")]
+pub fn render_launchd_with(
+    cfg: &AppConfig,
+    exe_path: &Path,
+    data_dir: &Path,
+) -> Result<LaunchdRender> {
+    validate_schedule(cfg)?;
+    let mut plist = String::new();
+    let logs_dir = default_logs_dir()?;
+    let stdout_path = logs_dir.join("grindvakt.out.log");
+    let stderr_path = logs_dir.join("grindvakt.err.log");
+    let mut schedule = String::new();
+    // Precedence: calendar if set; else interval
+    if let Some(cal) = &cfg.schedule.calendar {
+        let t = cal.trim().to_lowercase();
+        match t.as_str() {
+            "daily" => {
+                schedule.push_str("<key>StartCalendarInterval</key><dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>\n");
+            }
+            "hourly" => {
+                schedule.push_str("<key>StartCalendarInterval</key><dict><key>Minute</key><integer>0</integer></dict>\n");
+            }
+            "*:0/10" => {
+                // Render as StartCalendarInterval array of minute marks 0,10,20,30,40,50
+                schedule.push_str("<key>StartCalendarInterval</key><array>\n");
+                for m in [0, 10, 20, 30, 40, 50] {
+                    schedule.push_str(&format!(
+                        "<dict><key>Minute</key><integer>{}</integer></dict>\n",
+                        m
+                    ));
+                }
+                schedule.push_str("</array>\n");
+            }
+            other => {
+                bail!("unsupported macOS calendar expression: {}", other);
+            }
+        }
+    } else if let Some(secs) = cfg.schedule.interval_secs {
+        schedule.push_str(&format!(
+            "<key>StartInterval</key><integer>{}</integer>\n",
+            secs.max(60)
+        ));
+    }
+    plist.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+    plist.push('\n');
+    plist.push_str(r#"<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">"#);
+    plist.push('\n');
+    plist.push_str(r#"<plist version="1.0">"#);
+    plist.push('\n');
+    plist.push_str("<dict>\n");
+    plist.push_str(&format!(
+        "<key>Label</key><string>{}</string>\n",
+        LAUNCHD_LABEL
+    ));
+    plist.push_str("<key>ProgramArguments</key>\n<array>\n");
+    plist.push_str(&format!(
+        "<string>{}</string>\n",
+        xml_escape(&exe_path.display().to_string())
+    ));
+    plist.push_str("<string>sync</string>\n");
+    plist.push_str(&format!(
+        "<string>--data-dir={}</string>\n",
+        xml_escape(&data_dir.display().to_string())
+    ));
+    plist.push_str("</array>\n");
+    plist.push_str(&schedule);
+    plist.push_str("<key>RunAtLoad</key><false/>\n");
+    plist.push_str("<key>StandardOutPath</key>\n");
+    plist.push_str(&format!(
+        "<string>{}</string>\n",
+        xml_escape(&stdout_path.display().to_string())
+    ));
+    plist.push_str("<key>StandardErrorPath</key>\n");
+    plist.push_str(&format!(
+        "<string>{}</string>\n",
+        xml_escape(&stderr_path.display().to_string())
+    ));
+    plist.push_str("</dict>\n</plist>\n");
+    Ok(LaunchdRender { plist })
+}
+
+#[cfg(target_os = "macos")]
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 fn validate_schedule(cfg: &AppConfig) -> Result<()> {
     // Forbid newlines and '%' specifiers; basic length check
     if let Some(cal) = &cfg.schedule.calendar
@@ -100,6 +204,7 @@ impl InstallUnits {
     pub fn new() -> Self {
         Self
     }
+    #[cfg(target_os = "linux")]
     pub async fn install(&self, cfg: &AppConfig, exe_path: &Path, data_dir: &Path) -> Result<()> {
         let dir = default_user_unit_dir()?;
         ensure_dir_0700(&dir)?;
@@ -114,8 +219,27 @@ impl InstallUnits {
         );
         Ok(())
     }
+    #[cfg(target_os = "macos")]
+    pub async fn install(&self, cfg: &AppConfig, exe_path: &Path, data_dir: &Path) -> Result<()> {
+        let dir = default_launch_agents_dir()?;
+        ensure_dir_0700(&dir)?;
+        // Ensure logs dir as well
+        let logs_dir = default_logs_dir()?;
+        ensure_dir_0700(&logs_dir)?;
+        let rendered = render_launchd_with(cfg, exe_path, data_dir)?;
+        let path = dir.join(format!("{}.plist", LAUNCHD_LABEL));
+        write_plist_file(&path, &rendered.plist)?;
+        println!("Installed launch agent to {}", path.display());
+        println!("Note: agent is not loaded automatically. Load later with:");
+        println!("  launchctl load {}", path.display());
+        println!(
+            "Unattended credential (Keychain) recommended: run `grindvakt service enroll-credential`."
+        );
+        Ok(())
+    }
 }
 
+#[cfg(target_os = "linux")]
 fn write_unit_file(path: &Path, content: &str) -> Result<()> {
     // Unit files are typically 0644
     let parent = path.parent().ok_or_else(|| anyhow::anyhow!("no parent"))?;
@@ -128,6 +252,30 @@ fn write_unit_file(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn write_plist_file(path: &Path, content: &str) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| anyhow::anyhow!("no parent"))?;
+    ensure_dir_0700(parent)?;
+    // Reject symlink targets (including dangling)
+    match fs::symlink_metadata(path) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                bail!("refusing to overwrite symlink {}", path.display());
+            }
+        }
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(e).with_context(|| format!("stat {}", path.display()));
+            }
+        }
+    }
+    // Atomic 0600 write
+    crate::fsutil::atomic_write_0600(path, content.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 fn default_user_unit_dir() -> Result<PathBuf> {
     let home = directories::UserDirs::new()
         .ok_or_else(|| anyhow::anyhow!("no home dir"))?
@@ -136,6 +284,7 @@ fn default_user_unit_dir() -> Result<PathBuf> {
     Ok(home.join(".config/systemd/user"))
 }
 
+#[cfg(target_os = "linux")]
 fn default_credstore_path() -> Result<PathBuf> {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         return Ok(PathBuf::from(xdg).join("systemd/user/credstore.encrypted"));
@@ -145,4 +294,22 @@ fn default_credstore_path() -> Result<PathBuf> {
         .home_dir()
         .to_path_buf();
     Ok(home.join(".config/systemd/user/credstore.encrypted"))
+}
+
+#[cfg(target_os = "macos")]
+fn default_launch_agents_dir() -> Result<PathBuf> {
+    let home = directories::UserDirs::new()
+        .ok_or_else(|| anyhow::anyhow!("no home dir"))?
+        .home_dir()
+        .to_path_buf();
+    Ok(home.join("Library/LaunchAgents"))
+}
+
+#[cfg(target_os = "macos")]
+fn default_logs_dir() -> Result<PathBuf> {
+    let home = directories::UserDirs::new()
+        .ok_or_else(|| anyhow::anyhow!("no home dir"))?
+        .home_dir()
+        .to_path_buf();
+    Ok(home.join("Library/Logs/Grindvakt"))
 }
