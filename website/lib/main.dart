@@ -17,7 +17,18 @@ class GrindvaktSite extends StatelessComponent {
           ),
           .text('Grindvakt'),
         ]),
-        nav(classes: 'nav', [
+        // Mobile toggle (hidden on desktop)
+        Component.element(
+          tag: 'button',
+          classes: 'menu-toggle',
+          attributes: {
+            'id': 'menu-toggle',
+            'aria-controls': 'site-nav',
+            'aria-expanded': 'false',
+          },
+          children: [.text('Menu')],
+        ),
+        nav(id: 'site-nav', classes: 'nav', [
           a(href: '#install', [.text('Install')]),
           a(href: '#setup', [.text('Setup')]),
           a(href: '#security', [.text('Security')]),
@@ -122,10 +133,50 @@ class GrindvaktSite extends StatelessComponent {
           h2([.text('Setup (systemd —user)')]),
           ol([
             li([
-              code([.text('grindvakt init')]),
+              .text('Create a seed config (e.g., seed.toml) with your '),
+              code([.text('zone')]),
+              .text(', '),
+              code([.text('name')]),
+              .text(', '),
+              code([.text('ttl')]),
+              .text(', and '),
+              code([.text('[schedule]')]),
+              .text('. Example:'),
+              Component.element(
+                tag: 'pre',
+                children: [
+                  Component.element(
+                    tag: 'code',
+                    children: [
+                      .text('''zone = "example.com"
+name = "@"
+ttl = 300
+
+[schedule]
+interval_secs = 300
+'''),
+                    ],
+                  ),
+                ],
+              ),
+              p([
+                .text('Replace '),
+                code([.text('example.com')]),
+                .text(' and '),
+                code([.text('name')]),
+                .text(' with your actual domain and label (use '),
+                code([.text('@')]),
+                .text(' for apex). Then run:'),
+              ]),
             ]),
             li([
-              code([.text('grindvakt enroll --tpm=auto')]),
+              code([.text('grindvakt init --from seed.toml')]),
+            ]),
+            li([
+              code([.text('grindvakt sync --dry-run')]),
+            ]),
+            li([
+              code([.text('grindvakt service enroll-credential')]),
             ]),
             li([
               code([.text('grindvakt service install')]),
@@ -136,7 +187,7 @@ class GrindvaktSite extends StatelessComponent {
           ]),
           p([
             .text(
-              'Enrollment is explicit; no unattended prompts on non‑TTY. TPM fallback is not automatic.',
+              'Enrollment is required before enabling the timer. Dry‑run reads your public IP and DNS state but does not write.',
             ),
           ]),
         ]),
@@ -172,13 +223,13 @@ class GrindvaktSite extends StatelessComponent {
               },
             ),
           ]),
-          ul(classes: 'background-downloads', [
-            _bg('1920x1080'),
-            _bg('2560x1440'),
-            _bg('3840x2160'),
-            _bg('1920x1200'),
-            _bg('2560x1600'),
-            _bg('3440x1440'),
+          ul(classes: 'backgrounds-grid', [
+            _bgCard('1920x1080'),
+            _bgCard('2560x1440'),
+            _bgCard('3840x2160'),
+            _bgCard('1920x1200'),
+            _bgCard('2560x1600'),
+            _bgCard('3440x1440'),
           ]),
         ]),
       ]),
@@ -189,6 +240,11 @@ class GrindvaktSite extends StatelessComponent {
           .text('WeirdBrains / Grindvakt'),
         ]),
       ]),
+      // External client-side script to toggle mobile menu.
+      Component.element(
+        tag: 'script',
+        attributes: {'src': '/menu.js', 'defer': 'defer'},
+      ),
     ]);
   }
 
@@ -199,19 +255,34 @@ class GrindvaktSite extends StatelessComponent {
     ]);
   }
 
-  Component _bg(String size) {
+  Component _bgCard(String size) {
     final href = '/assets/backgrounds/grindvakt-viking-$size.png';
+    final thumb = '/assets/backgrounds/grindvakt-viking-$size-thumb.webp';
     final label = size == '3840x2160'
         ? '3840 × 2160 (4K, upscaled)'
         : size.replaceAll('x', ' × ');
-    // Use a() when possible; attach download attribute via Component.element for broad support.
-    return li([
-      Component.element(
-        tag: 'a',
-        classes: 'download-link',
-        attributes: {'href': href, 'download': 'grindvakt-viking-$size.png'},
-        children: [.text('Download $label')],
+    return li(classes: 'bg-card', [
+      img(
+        src: thumb,
+        attributes: {
+          'alt': 'Wallpaper $label',
+          'loading': 'lazy',
+          'width': '480',
+        },
       ),
+      div(classes: 'bg-caption', [
+        span([.text(label)]),
+        Component.element(
+          tag: 'a',
+          classes: 'download-link',
+          attributes: {
+            'href': href,
+            'download': 'grindvakt-viking-$size.png',
+            'aria-label': 'Download $label',
+          },
+          children: [.text('Download')],
+        ),
+      ]),
     ]);
   }
 }
