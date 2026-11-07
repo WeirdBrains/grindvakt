@@ -11,7 +11,9 @@ Key components
   - Password-derived Argon2id key (bounded params, independent salt).
   - Recovery-derived HKDF-SHA256 key from a 24-word BIP39 phrase (independent salt).
   Versioned authenticated format with clear AAD, atomic write, and strict file/dir permissions.
-- `src/service.rs`: systemd --user oneshot `grindvakt.service` and configurable `grindvakt.timer`. Optional TPM2-bound unattended credential enrollment via `systemd-creds --user encrypt --with-key=host+tpm2` producing `~/.config/systemd/user/credstore.encrypted/grindvakt.dek.enc` and `LoadCredentialEncrypted=` in the unit.
+- `src/service.rs`:
+  - Linux: systemd --user oneshot `grindvakt.service` and configurable `grindvakt.timer`. Optional TPM2-bound unattended credential enrollment via `systemd-creds --user encrypt --with-key=host+tpm2` producing `~/.config/systemd/user/credstore.encrypted/grindvakt.dek.enc` and `LoadCredentialEncrypted=` in the unit.
+  - macOS: per-user launchd agent `.plist` with `ProgramArguments = [<exe>, sync, --data-dir=...]`, `StartInterval` for interval schedules, and simple StartCalendarInterval mapping for `daily`. Logs to `~/Library/Logs/Grindvakt/`. CLI prints and installs the agent but does not load it.
 - `src/config.rs`: TOML config parser and normalizer, with schedule either `interval_secs` (default 300) or `calendar`.
 - `src/lock.rs`: Flock preventing overlap (service/manual).
 
@@ -27,7 +29,7 @@ Security properties and limits
 - No secrets in CLI args, env, or logs; secret prompts require a local TTY.
 - Directory 0700 and files 0600, atomic temp+fsync+rename+dir fsync.
 - Bounded Argon2id parameters to avoid resource-exhaustion attacks; reject unknown/tampered versions.
-- Unattended mode decrypts on this machine+user after enrollment; password-only changes do not revoke access. Use rewrap/rotation to revoke and reseal DEK explicitly.
+- Unattended mode decrypts on this machine+user after enrollment; password-only changes do not revoke access. Use rewrap/rotation to revoke and reseal DEK explicitly. On macOS the DEK is stored in Keychain as a generic password (service=grindvakt, account=grindvakt.dek).
 - Timers require a running user manager; linger is not modified.
 
 Testing (to be run on alien-blue; heavy runs are intentionally skipped here)

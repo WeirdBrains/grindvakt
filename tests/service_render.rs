@@ -1,3 +1,4 @@
+#![cfg(target_os = "linux")]
 use grindvakt::config::{AppConfig, Provider, Schedule};
 use grindvakt::service::render_units_with;
 use std::path::PathBuf;
