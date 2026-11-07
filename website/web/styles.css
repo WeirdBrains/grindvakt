@@ -23,7 +23,7 @@ main { flex: 1; }
 .btn { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid rgba(231,226,215,0.2); border-radius: 10px; color: var(--ivory); }
 .btn.primary { background: linear-gradient(180deg, rgba(199,168,64,0.22), rgba(199,168,64,0.10)); border-color: rgba(199,168,64,0.45); }
 .hero-right { display: flex; justify-content: center; }
-.mjolnir { width: 220px; height: 220px; fill: var(--ivory); opacity: 0.95; filter: drop-shadow(0 8px 24px rgba(0,0,0,0.45)); }
+.mjolnir { width: 220px; height: 220px; object-fit: contain; opacity: 0.95; filter: drop-shadow(0 8px 24px rgba(0,0,0,0.45)); }
 .features { max-width: 1180px; margin: 28px auto; padding: 0 20px; display: grid; gap: 16px; grid-template-columns: repeat(4, 1fr); }
 .feature { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 16px; }
 .feature h3 { margin: 0 0 8px; font-size: 18px; color: var(--ivory); }

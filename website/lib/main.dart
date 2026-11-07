@@ -50,32 +50,11 @@ class GrindvaktSite extends StatelessComponent {
               ]),
             ]),
             div(classes: 'hero-right', [
-              // Thor's hammer icon (SVG)
-              Component.element(
-                tag: 'svg',
+              // Use the existing guard logo prominently as the hero ornament.
+              img(
+                src: '/assets/grindvakt-guard-logo.jpg',
                 classes: 'mjolnir',
-                attributes: {'viewBox': '0 0 128 128'},
-                children: [
-                  Component.element(
-                    tag: 'path',
-                    attributes: {
-                      'd': 'M48 8h32v16h16v24H80v20l16 16v20H32V84l16-16V48H32V24h16z',
-                    },
-                    children: const [],
-                  ),
-                  Component.element(
-                    tag: 'rect',
-                    attributes: {
-                      'x': '56',
-                      'y': '88',
-                      'width': '16',
-                      'height': '24',
-                      'rx': '3',
-                      'ry': '3',
-                    },
-                    children: const [],
-                  ),
-                ],
+                attributes: {'alt': '', 'aria-hidden': 'true'},
               ),
             ]),
           ]),
