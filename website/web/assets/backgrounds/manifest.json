@@ -1,0 +1,62 @@
+{
+  "source": "grindvakt-viking-3440x1440.png",
+  "notes": "Centered aspect-ratio crops; no distortion. 3840x2160 is an upscale of the source art, not native 4K.",
+  "files": [
+    {
+      "filename": "grindvakt-viking-1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 1550779,
+      "sha256": "6c7be4aa5a7b9c83e8e0abfa36742dfb5a9b12d84368ed0406df1f0a814c4e4a",
+      "upscaled": false
+    },
+    {
+      "filename": "grindvakt-viking-2560x1440.png",
+      "width": 2560,
+      "height": 1440,
+      "bytes": 2137997,
+      "sha256": "18bfa81edc4a8dc0edf7e2df542ddef22f2a465444f28ef0696ea608c23b4b7b",
+      "upscaled": false
+    },
+    {
+      "filename": "grindvakt-viking-3840x2160.png",
+      "width": 3840,
+      "height": 2160,
+      "bytes": 3817854,
+      "sha256": "bc7f329eacb76e782adc60a01494b0bee2eb1255a0e4adc6a2c1b74fbdecb8d1",
+      "upscaled": true
+    },
+    {
+      "filename": "grindvakt-viking-1920x1200.png",
+      "width": 1920,
+      "height": 1200,
+      "bytes": 1503797,
+      "sha256": "b85a0874161112be23afa5cf68a133fbb9136c1eff8b00aa9ed5343d80db83dc",
+      "upscaled": false
+    },
+    {
+      "filename": "grindvakt-viking-2560x1600.png",
+      "width": 2560,
+      "height": 1600,
+      "bytes": 2184315,
+      "sha256": "d1e02e30e8b8135bb847082b9231dfa351f22799985757df6a5f13f5a2bda61b",
+      "upscaled": false
+    },
+    {
+      "filename": "grindvakt-viking-3440x1440.png",
+      "width": 3440,
+      "height": 1440,
+      "bytes": 3197107,
+      "sha256": "55e80a6efe417e63eca9a7b31699cd14febb1eeaf2bc081e2666c937af7fcf80",
+      "upscaled": false
+    },
+    {
+      "filename": "grindvakt-viking-preview.webp",
+      "width": 1200,
+      "height": 502,
+      "bytes": 61796,
+      "sha256": "5b9367a97dce84f32528ad51b5e374ae1ecf1c5f8137828c70c34491fa95c1a2",
+      "purpose": "site-preview"
+    }
+  ]
+}
