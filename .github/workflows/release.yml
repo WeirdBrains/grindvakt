@@ -123,17 +123,17 @@ jobs:
         shell: bash
         run: |
           scripts/package/make-deb-cargo.sh \
-            --binary target/x86_64-unknown-linux-musl/release/grindvakt \
+            --binary "$PWD/target/x86_64-unknown-linux-musl/release/grindvakt" \
             --version "${{ steps.cargo.outputs.cargo }}" \
-            --outdir dist
+            --outdir "$PWD/dist"
 
       - name: Build .rpm (cargo-generate-rpm wrapper)
         shell: bash
         run: |
           scripts/package/make-rpm.sh \
-            --binary target/x86_64-unknown-linux-musl/release/grindvakt \
+            --binary "$PWD/target/x86_64-unknown-linux-musl/release/grindvakt" \
             --version "${{ steps.cargo.outputs.cargo }}" \
-            --outdir dist
+            --outdir "$PWD/dist"
 
       - name: Build Arch .pkg.tar.zst (makepkg in Arch container)
         shell: bash
