@@ -62,8 +62,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PY='import tomllib,sys;print(tomllib.loads(open("Cargo.toml","rb").read())["package"]["version"])'
-          CARGO_VERSION="$(python3 -c "$PY")"
+          CARGO_VERSION=$(python3 -c "import tomllib,sys; print(tomllib.load(open('Cargo.toml','rb'))['package']['version'])")
           echo "cargo=$CARGO_VERSION" >> "$GITHUB_OUTPUT"
           test -n "$CARGO_VERSION"
 
