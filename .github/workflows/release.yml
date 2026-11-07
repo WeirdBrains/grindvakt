@@ -88,10 +88,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD":/src -w /src rust:1.99-alpine sh -lc '
+          docker run --rm -v "$PWD":/src -w /src rust:1.99-alpine sh -c '
             set -e
             apk add --no-cache musl-dev cmake perl make clang
-            rustup target add x86_64-unknown-linux-musl
             RUSTFLAGS="-C target-feature=+crt-static" cargo build --locked --release --target x86_64-unknown-linux-musl
             strip -s target/x86_64-unknown-linux-musl/release/grindvakt || true
           '
@@ -146,7 +145,7 @@ jobs:
             -e BINARY="/src/target/x86_64-unknown-linux-musl/release/grindvakt" \
             -e OUTDIR="/src/dist" \
             -v "$PWD":/src -w /src archlinux:base \
-            sh -lc 'sh /src/scripts/package/arch-build-inner.sh'
+            sh -c 'sh /src/scripts/package/arch-build-inner.sh'
 
       - name: Fix ownership of dist artifacts
         shell: bash
