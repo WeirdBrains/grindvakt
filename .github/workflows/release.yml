@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing tag to release (e.g., v0.1.0)'
+        required: false
+        type: string
 
 jobs:
   release:
@@ -13,6 +19,7 @@ jobs:
       contents: write
     env:
       TAG_REF: ${{ github.ref_name }}
+      RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -25,21 +32,48 @@ jobs:
           rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
           rustup default 1.99.1
 
-      - name: Extract versions
+      - name: Resolve release tag
         id: ver
         shell: bash
         run: |
           set -euo pipefail
-          TAG_VERSION="${TAG_REF#v}"
+          # Resolve tag: prefer manual input, else use ref name
+          RES_TAG="${RELEASE_TAG_INPUT:-}"
+          if [ -z "$RES_TAG" ]; then
+            RES_TAG="$TAG_REF"
+          fi
+          # Validate tag format strictly: vN(.N)*
+          if [[ ! "$RES_TAG" =~ ^v[0-9]+([.][0-9]+)*$ ]]; then
+            echo "Invalid tag format: $RES_TAG" >&2
+            exit 1
+          fi
+          echo "rel_tag=$RES_TAG" >> "$GITHUB_OUTPUT"
+          echo "tag=${RES_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout resolved tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          git checkout "refs/tags/${{ steps.ver.outputs.rel_tag }}"
+
+      - name: Read Cargo version at tag
+        id: cargo
+        shell: bash
+        run: |
+          set -euo pipefail
           PY='import tomllib,sys;print(tomllib.loads(open("Cargo.toml","rb").read())["package"]["version"])'
           CARGO_VERSION="$(python3 -c "$PY")"
-          echo "tag=$TAG_VERSION" >> "$GITHUB_OUTPUT"
           echo "cargo=$CARGO_VERSION" >> "$GITHUB_OUTPUT"
-          if [ -z "$CARGO_VERSION" ] || [ -z "$TAG_VERSION" ]; then
-            echo "Missing version(s)"; exit 1
-          fi
-          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
-            echo "Tag ($TAG_VERSION) != Cargo.toml ($CARGO_VERSION)"; exit 1
+          test -n "$CARGO_VERSION"
+
+      - name: Verify tag equals Cargo.toml version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.ver.outputs.tag }}" != "${{ steps.cargo.outputs.cargo }}" ]; then
+            echo "Tag (${{ steps.ver.outputs.tag }}) != Cargo.toml (${{ steps.cargo.outputs.cargo }})" >&2
+            exit 1
           fi
 
       - name: Quality gates (fmt/check/test/clippy)
@@ -92,7 +126,7 @@ jobs:
         run: |
           scripts/package/make-deb-cargo.sh \
             --binary target/x86_64-unknown-linux-musl/release/grindvakt \
-            --version "${{ steps.ver.outputs.cargo }}" \
+            --version "${{ steps.cargo.outputs.cargo }}" \
             --outdir dist
 
       - name: Build .rpm (cargo-generate-rpm wrapper)
@@ -100,7 +134,7 @@ jobs:
         run: |
           scripts/package/make-rpm.sh \
             --binary target/x86_64-unknown-linux-musl/release/grindvakt \
-            --version "${{ steps.ver.outputs.cargo }}" \
+            --version "${{ steps.cargo.outputs.cargo }}" \
             --outdir dist
 
       - name: Build Arch .pkg.tar.zst (makepkg in Arch container)
@@ -109,7 +143,7 @@ jobs:
           docker run --rm \
             -e HOST_UID="$(id -u)" \
             -e HOST_GID="$(id -g)" \
-            -e VERSION="${{ steps.ver.outputs.cargo }}" \
+            -e VERSION="${{ steps.cargo.outputs.cargo }}" \
             -e BINARY="/src/target/x86_64-unknown-linux-musl/release/grindvakt" \
             -e OUTDIR="/src/dist" \
             -v "$PWD":/src -w /src archlinux:base \
@@ -127,10 +161,10 @@ jobs:
       - name: Upload release
         uses: softprops/action-gh-release@69320dbe05506a9a39fc8ae11030b214ec2d1f87 # v2.0.5
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ steps.ver.outputs.rel_tag }}
+          name: ${{ steps.ver.outputs.rel_tag }}
           body: |
-            Automated release for ${{ github.ref_name }}.
+            Automated release for ${{ steps.ver.outputs.rel_tag }}.
             Includes portable x86_64 musl binary (.tar.gz) and native installers (.deb, .rpm, .pkg.tar.zst).
           files: |
             dist/*
