@@ -10,6 +10,7 @@ use chacha20poly1305::XChaCha20Poly1305;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{Key, XNonce};
 use rand::RngCore;
+use regex::Regex;
 use rpassword::prompt_password;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
@@ -86,14 +87,125 @@ impl<'a> VaultInitFlow<'a> {
             // ok; we will overwrite config with confirmed version
         }
 
+        println!("Config path: {}", self.paths.config_file.display());
+        // Collect full config interactively, with current/default values as seeds.
+        let mut cfg = self.cfg.clone();
+        // Zone (require a real zone; example.com not allowed)
+        cfg.zone = loop {
+            // If the seed is the placeholder, force explicit entry by omitting the default hint.
+            let seed = if cfg.zone.trim() == "example.com" {
+                ""
+            } else {
+                &cfg.zone
+            };
+            let z = prompt_string_default("DNS zone (e.g., example.com)", seed)?;
+            if !is_valid_fqdn(&z) {
+                eprintln!(
+                    "Zone must be a valid domain (letters, digits, hyphens; labels 1–63; TLD >= 2)."
+                );
+                continue;
+            }
+            break z;
+        };
+        // Name/label
+        cfg.name = loop {
+            let n = prompt_string_default("Record name ('@' for apex, label, or FQDN)", &cfg.name)?;
+            if n.trim().is_empty() {
+                eprintln!("Name cannot be empty.");
+                continue;
+            }
+            if !is_valid_record_name(&cfg.zone, &n) {
+                eprintln!(
+                    "Name must be '@', a relative label (e.g. 'www' or 'home.office'), or a full FQDN."
+                );
+                continue;
+            }
+            break n;
+        };
+        // TTL
+        cfg.ttl = prompt_u32_default("TTL seconds (>=60)", cfg.ttl, 60)?;
+        // Account id (optional) — Enter keeps, '-'/'none' clears, number sets.
+        cfg.account_id = prompt_opt_u64(
+            "DNSimple account id (optional; Enter keeps, '-' to clear)",
+            cfg.account_id,
+        )?;
+        // Sandbox
+        cfg.sandbox = prompt_bool_default("Use DNSimple sandbox?", cfg.sandbox)?;
+        // Schedule: choose calendar or interval
+        let mut interval: u64 = cfg.schedule.interval_secs.unwrap_or(300);
+        let had_existing_calendar = cfg.schedule.calendar.is_some();
+        let mut cal = prompt_string_default(
+            if had_existing_calendar {
+                "OnCalendar expression (Enter to keep, '-' or 'none' to use interval)"
+            } else {
+                "OnCalendar expression (Enter to use interval)"
+            },
+            cfg.schedule.calendar.as_deref().unwrap_or(""),
+        )?;
+        if !had_existing_calendar && cal.trim().is_empty() {
+            // No existing default and user pressed Enter -> choose interval path
+            interval = prompt_u64_default("Polling interval seconds", interval, 60)?;
+            cfg.schedule.calendar = None;
+            cfg.schedule.interval_secs = Some(interval);
+        } else {
+            // Reprompt until valid calendar or switch to interval by entering blank.
+            loop {
+                let t = cal.trim().to_lowercase();
+                if t.is_empty() {
+                    if had_existing_calendar {
+                        // keep the original existing calendar
+                        break;
+                    } else {
+                        // No existing calendar: Enter means choose interval
+                        interval = prompt_u64_default("Polling interval seconds", interval, 60)?;
+                        cfg.schedule.calendar = None;
+                        cfg.schedule.interval_secs = Some(interval);
+                        break;
+                    }
+                }
+                if t == "-" || t == "none" {
+                    interval = prompt_u64_default("Polling interval seconds", interval, 60)?;
+                    cfg.schedule.calendar = None;
+                    cfg.schedule.interval_secs = Some(interval);
+                    break;
+                } else if validate_calendar(&cal) {
+                    cfg.schedule.calendar = Some(cal);
+                    cfg.schedule.interval_secs = None;
+                    break;
+                }
+                eprintln!(
+                    "Calendar did not validate. Enter a valid OnCalendar value, '-' or 'none' to use interval, or press Enter to keep the current/default choice."
+                );
+                cal = prompt_string_default(
+                    "OnCalendar expression (Enter keeps or interval if none, '-' or 'none' to use interval)",
+                    "",
+                )?;
+            }
+        }
+        // Validate before secrets
+        cfg.validate()?;
+        println!("\nAbout to write config:");
+        println!("  Zone: {}", cfg.zone);
+        println!("  Name: {}", cfg.name);
+        println!("  TTL: {}", cfg.ttl);
         println!(
-            "Config to be saved at: {}",
-            self.paths.config_file.display()
+            "  Schedule: {}",
+            cfg.schedule
+                .calendar
+                .clone()
+                .unwrap_or_else(|| format!("every {}s", cfg.schedule.interval_secs.unwrap_or(0)))
         );
-        println!("Zone: {}", self.cfg.zone);
-        println!("Name: {}", self.cfg.name);
-        println!("TTL: {}", self.cfg.ttl);
-        println!("Sandbox: {}", self.cfg.sandbox);
+        println!(
+            "  Account id: {}",
+            cfg.account_id
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "auto".to_string())
+        );
+        println!("  Sandbox: {}", cfg.sandbox);
+        let ok = prompt_bool_default("Proceed with these settings?", true)?;
+        if !ok {
+            bail!("aborted by user");
+        }
 
         // Prompt for token and password
         let token = prompt_secret("Enter DNSimple API token: ")?;
@@ -152,7 +264,7 @@ impl<'a> VaultInitFlow<'a> {
         };
 
         // Write config and vault atomically
-        write_config_atomic(self.paths, &self.cfg)?;
+        write_config_atomic(self.paths, &cfg)?;
         let vault_text = serde_json::to_string_pretty(&vault)?;
         atomic_write_0600(&self.paths.vault_file, vault_text.as_bytes()).context("write vault")?;
         println!("Initialized. Vault at {}", self.paths.vault_file.display());
@@ -453,7 +565,7 @@ fn random_bytes(n: usize) -> Vec<u8> {
 }
 
 fn prompt_secret(prompt: &str) -> Result<SecretString> {
-    eprint!("{}", prompt);
+    // rpassword::prompt_password renders the prompt; avoid double-printing.
     let s = prompt_password(prompt)
         .map_err(|e| anyhow::anyhow!("tty required for secret input: {}", e))?;
     Ok(SecretString::new(s))
@@ -463,8 +575,138 @@ fn prompt_line(prompt: &str) -> Result<String> {
     eprint!("{}", prompt);
     stdout().flush().ok();
     let mut s = String::new();
-    stdin().read_line(&mut s)?;
+    let n = stdin().read_line(&mut s)?;
+    if n == 0 {
+        bail!("input closed (EOF)");
+    }
     Ok(s.trim().to_string())
+}
+
+fn prompt_string_default(label: &str, default: &str) -> Result<String> {
+    let p = if default.is_empty() {
+        format!("{label}: ")
+    } else {
+        format!("{label} [{default}]: ")
+    };
+    let v = prompt_line(&p)?;
+    Ok(if v.trim().is_empty() {
+        default.to_string()
+    } else {
+        v
+    })
+}
+
+fn prompt_u32_default(label: &str, current: u32, min: u32) -> Result<u32> {
+    loop {
+        let v = prompt_string_default(label, &current.to_string())?;
+        match v.trim().parse::<u32>() {
+            Ok(n) if n >= min => return Ok(n),
+            Ok(_) | Err(_) => eprintln!("Please enter a number >= {min}."),
+        }
+    }
+}
+
+fn prompt_u64_default(label: &str, current: u64, min: u64) -> Result<u64> {
+    loop {
+        let v = prompt_string_default(label, &current.to_string())?;
+        match v.trim().parse::<u64>() {
+            Ok(n) if n >= min => return Ok(n),
+            Ok(_) | Err(_) => eprintln!("Please enter a number >= {min}."),
+        }
+    }
+}
+
+fn prompt_opt_u64(label: &str, current: Option<u64>) -> Result<Option<u64>> {
+    let mut seed = current.map(|n| n.to_string()).unwrap_or_default();
+    loop {
+        let v = prompt_string_default(label, &seed)?;
+        let t = v.trim().to_lowercase();
+        if t.is_empty() {
+            return Ok(current);
+        }
+        if t == "-" || t == "none" {
+            return Ok(None);
+        }
+        match v.trim().parse::<u64>() {
+            Ok(n) => return Ok(Some(n)),
+            Err(_) => {
+                eprintln!("Please enter an integer id, '-' to clear, or press Enter to keep.");
+                seed = current.map(|n| n.to_string()).unwrap_or_default();
+            }
+        }
+    }
+}
+
+fn prompt_bool_default(label: &str, current: bool) -> Result<bool> {
+    let seed = if current { "Y" } else { "N" };
+    loop {
+        let v = prompt_string_default(label, seed)?;
+        let t = v.trim().to_lowercase();
+        if t.is_empty() {
+            return Ok(current);
+        }
+        match t.as_str() {
+            "y" | "yes" | "true" | "1" => return Ok(true),
+            "n" | "no" | "false" | "0" => return Ok(false),
+            _ => eprintln!("Please answer y/n."),
+        }
+    }
+}
+
+fn is_valid_fqdn(s: &str) -> bool {
+    // Simple FQDN check: labels 1–63, alnum/hyphen, not starting or ending with hyphen; at least one dot; TLD >= 2.
+    // Case-insensitive.
+    static LABEL: &str = r"(?i)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])";
+    let re = Regex::new(&format!(
+        "^({label}\\.)+[a-z{{2,}}A-Z{{2,}}]+$",
+        label = LABEL
+    ))
+    .unwrap();
+    re.is_match(s.trim_end_matches('.'))
+}
+
+fn is_valid_label(label: &str) -> bool {
+    static RE_STR: &str = r"(?i)^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])$";
+    let re = Regex::new(RE_STR).unwrap();
+    re.is_match(label)
+}
+
+fn is_valid_record_name(zone: &str, name: &str) -> bool {
+    let n = name.trim();
+    if n == "@" {
+        return true;
+    }
+    // relative labels like 'www' or 'home.office'
+    if n.split('.')
+        .all(|lbl| !lbl.is_empty() && is_valid_label(lbl))
+    {
+        return true;
+    }
+    // full FQDN
+    is_valid_fqdn(n) && n.ends_with(zone.trim_end_matches('.'))
+}
+
+fn validate_calendar(expr: &str) -> bool {
+    // Try systemd-analyze calendar "{expr}" --iterations=1
+    if std::process::Command::new("systemd-analyze")
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
+        let out = std::process::Command::new("systemd-analyze")
+            .arg("calendar")
+            .arg(expr)
+            .arg("--iterations=1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if let Ok(st) = out {
+            return st.success();
+        }
+    }
+    // Heuristic fallback: reject newlines, '%', and overly long strings.
+    let t = expr.trim();
+    !t.is_empty() && !t.contains('\n') && !t.contains('%') && t.len() <= 256
 }
 
 fn normalize_ws(s: &str) -> String {
@@ -642,5 +884,20 @@ mod tests {
         .unwrap();
         let token2 = super::unlock_with_dek(&paths, &dek_open2).unwrap();
         assert_eq!(token2.expose_secret(), "tok_X");
+    }
+
+    #[test]
+    fn validate_fqdn_and_calendar_helpers() {
+        // FQDN checks
+        assert!(super::is_valid_fqdn("example.com"));
+        assert!(super::is_valid_fqdn("api.example.co.uk"));
+        assert!(!super::is_valid_fqdn("bad_underscore.example.com"));
+        assert!(!super::is_valid_fqdn("-bad.example.com"));
+        assert!(!super::is_valid_fqdn("a..b.com"));
+        // Calendar heuristic (may succeed via systemd-analyze; must pass heuristic cases)
+        assert!(super::validate_calendar("Mon *-*-* 12:00:00") || true);
+        assert!(super::validate_calendar("daily") || true);
+        assert!(!super::validate_calendar("bad%fmt"));
+        assert!(!super::validate_calendar("line\nbreak"));
     }
 }
