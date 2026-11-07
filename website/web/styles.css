@@ -41,3 +41,17 @@ ol { padding-left: 20px; }
   .features { grid-template-columns: 1fr; }
 }
 
+/* Backgrounds section */
+.backgrounds { max-width: 900px; margin: 36px auto; padding: 0 20px; }
+.wallpaper-preview { display: flex; justify-content: center; margin: 12px 0 20px; }
+.wallpaper-preview img { max-width: 100%; height: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+.background-downloads { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; padding: 0; margin: 0; }
+.download-link { display: inline-flex; justify-content: center; align-items: center; padding: 10px 12px; border: 1px solid rgba(231,226,215,0.18); border-radius: 10px; color: var(--ivory); background: rgba(255,255,255,0.02); }
+.download-link:hover { background: rgba(255,255,255,0.06); text-decoration: none; }
+@media (max-width: 900px) {
+  .background-downloads { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .background-downloads { grid-template-columns: 1fr; }
+}
+

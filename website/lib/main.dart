@@ -21,6 +21,7 @@ class GrindvaktSite extends StatelessComponent {
           a(href: '#install', [.text('Install')]),
           a(href: '#setup', [.text('Setup')]),
           a(href: '#security', [.text('Security')]),
+          a(href: '#backgrounds', [.text('Backgrounds')]),
           a(href: 'https://github.com/WeirdBrains/grindvakt/releases/latest', [
             .text('Releases'),
           ]),
@@ -155,6 +156,31 @@ class GrindvaktSite extends StatelessComponent {
             ]),
           ]),
         ]),
+        section(id: 'backgrounds', classes: 'backgrounds', [
+          h2([.text('Backgrounds')]),
+          p([
+            .text(
+              'Download wallpapers featuring the Grindvakt guard logo in common desktop sizes. ',
+            ),
+          ]),
+          div(classes: 'wallpaper-preview', [
+            img(
+              src: '/assets/backgrounds/grindvakt-viking-preview.webp',
+              attributes: {
+                'alt': 'Grindvakt wallpaper preview',
+                'loading': 'lazy',
+              },
+            ),
+          ]),
+          ul(classes: 'background-downloads', [
+            _bg('1920x1080'),
+            _bg('2560x1440'),
+            _bg('3840x2160'),
+            _bg('1920x1200'),
+            _bg('2560x1600'),
+            _bg('3440x1440'),
+          ]),
+        ]),
       ]),
       footer(classes: 'site-footer', [
         .text('© '),
@@ -170,6 +196,22 @@ class GrindvaktSite extends StatelessComponent {
     return div(classes: 'feature', [
       h3([.text(title)]),
       p([.text(body)]),
+    ]);
+  }
+
+  Component _bg(String size) {
+    final href = '/assets/backgrounds/grindvakt-viking-$size.png';
+    final label = size == '3840x2160'
+        ? '3840 × 2160 (4K, upscaled)'
+        : size.replaceAll('x', ' × ');
+    // Use a() when possible; attach download attribute via Component.element for broad support.
+    return li([
+      Component.element(
+        tag: 'a',
+        classes: 'download-link',
+        attributes: {'href': href, 'download': 'grindvakt-viking-$size.png'},
+        children: [.text('Download $label')],
+      ),
     ]);
   }
 }
