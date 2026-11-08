@@ -31,6 +31,7 @@ Install user service without enabling
 - Optional unattended credential enrollment:
   - Linux: TPM2-bound systemd-creds — `grindvakt service enroll-credential` (prompts for password; seals the DEK, not the password)
   - macOS: Keychain generic password (service=grindvakt, account=grindvakt.dek) — `grindvakt service enroll-credential`
+  - Linux users: If you enrolled before this fix, rerun `grindvakt service enroll-credential` once to regenerate the encrypted credential with the correct name. Old blobs may cause the service to fail at step CREDENTIALS. macOS users are not affected.
 - To enable timer later on Linux (requires active user manager; linger remains unchanged):
   - `systemctl --user enable --now grindvakt.timer`
 

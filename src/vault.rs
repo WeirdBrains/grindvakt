@@ -617,17 +617,16 @@ impl<'a> CredentialEnrollment<'a> {
         let dest_dir = &self.paths.credstore_dir;
         ensure_dir_0700(dest_dir)?;
         let dest_file = dest_dir.join(format!("{}.enc", CREDENTIAL_NAME));
-        let mut child = tokio::process::Command::new("systemd-creds")
-            .arg("--user")
-            .arg("encrypt")
-            .arg("--with-key=host+tpm2")
-            .arg("-")
-            .arg(&dest_file)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .context("launch systemd-creds")?;
+        // Build argument list once, so tests can validate without spawning
+        let args = systemd_creds_encrypt_args(&dest_file);
+        let mut child = {
+            let mut cmd = tokio::process::Command::new("systemd-creds");
+            cmd.args(&args)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped());
+            cmd.spawn().context("launch systemd-creds")?
+        };
         if let Some(mut stdin) = child.stdin.take() {
             use tokio::io::AsyncWriteExt;
             stdin.write_all(&dek).await?;
@@ -777,6 +776,20 @@ fn aead_encrypt_detached(
         )
         .map_err(|e| anyhow::anyhow!("aead encrypt: {}", e))?;
     Ok((nonce, ct))
+}
+
+#[cfg(target_os = "linux")]
+fn systemd_creds_encrypt_args(dest_file: &std::path::Path) -> Vec<std::ffi::OsString> {
+    use std::ffi::OsString;
+    vec![
+        OsString::from("--user"),
+        OsString::from("encrypt"),
+        OsString::from("--name"),
+        OsString::from(CREDENTIAL_NAME),
+        OsString::from("--with-key=host+tpm2"),
+        OsString::from("-"),
+        dest_file.as_os_str().to_os_string(),
+    ]
 }
 
 fn random_bytes(n: usize) -> Vec<u8> {
@@ -984,6 +997,23 @@ mod tests {
         assert!(bad_res.is_err());
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn systemd_creds_encrypt_args_include_explicit_credential_name() {
+        use std::ffi::OsString;
+        let dest = std::path::Path::new("/tmp/credstore.encrypted/grindvakt.dek.enc");
+        let got = super::systemd_creds_encrypt_args(dest);
+        let want: Vec<OsString> = vec![
+            "--user".into(),
+            "encrypt".into(),
+            "--name".into(),
+            CREDENTIAL_NAME.into(),
+            "--with-key=host+tpm2".into(),
+            "-".into(),
+            dest.as_os_str().to_os_string(),
+        ];
+        assert_eq!(got, want);
+    }
     #[test]
     fn wrong_password_fails_to_unwrap_dek() {
         let mut e = [0u8; 32];
