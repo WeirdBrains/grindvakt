@@ -38,7 +38,14 @@ pub enum Command {
     Recover(Recover),
     /// Change password using current password (rewrap DEK)
     ChangePassword(ChangePassword),
-    /// Manage systemd --user units and unattended credential
+    #[cfg_attr(
+        target_os = "linux",
+        doc = "Manage systemd --user units and unattended credential"
+    )]
+    #[cfg_attr(
+        target_os = "macos",
+        doc = "Manage launchd per-user agent and Keychain unattended credential"
+    )]
     Service {
         #[command(subcommand)]
         cmd: ServiceCmd,
@@ -283,9 +290,23 @@ impl ChangePassword {
 pub enum ServiceCmd {
     /// Print the service and timer units to stdout
     Print(PrintService),
-    /// Install service and timer units in ~/.config/systemd/user (not enabled)
+    #[cfg_attr(
+        target_os = "linux",
+        doc = "Install service and timer units in ~/.config/systemd/user (not enabled)"
+    )]
+    #[cfg_attr(
+        target_os = "macos",
+        doc = "Install per-user launch agent under ~/Library/LaunchAgents (not loaded)"
+    )]
     Install(InstallService),
-    /// Enroll TPM2-bound unattended credential (seals DEK; prompts for password)
+    #[cfg_attr(
+        target_os = "linux",
+        doc = "Enroll TPM2-bound unattended credential (seals DEK; prompts for password)"
+    )]
+    #[cfg_attr(
+        target_os = "macos",
+        doc = "Enroll Keychain unattended credential (stores DEK; prompts for password)"
+    )]
     EnrollCredential(EnrollCredential),
 }
 

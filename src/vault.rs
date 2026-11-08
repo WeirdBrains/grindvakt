@@ -24,6 +24,87 @@ const VAULT_VERSION: u32 = 1;
 const AAD_CONTEXT: &str = "grindvakt-vault-v1";
 const CREDENTIAL_NAME: &str = "grindvakt.dek";
 
+#[cfg(target_os = "macos")]
+fn keychain_identity_for(paths: &ConfigPaths) -> (String, String) {
+    // Vault-scoped account id to avoid cross-vault overwrite: account = "grindvakt.dek:<12-hex>"
+    let service = "grindvakt".to_string();
+    use sha2::Digest;
+    let mut hasher = Sha256::new();
+    let real = std::fs::canonicalize(&paths.data_dir).unwrap_or_else(|_| paths.data_dir.clone());
+    hasher.update(real.display().to_string().as_bytes());
+    let digest = hasher.finalize();
+    let mut suffix = String::with_capacity(12);
+    for b in digest[..6].iter() {
+        use std::fmt::Write as _;
+        let _ = write!(&mut suffix, "{:02x}", b);
+    }
+    let account = format!("{}:{}", CREDENTIAL_NAME, suffix);
+    (service, account)
+}
+
+#[cfg(target_os = "macos")]
+fn try_unattended_keychain_dek_scoped(
+    paths: &ConfigPaths,
+    keychains: Option<&[security_framework::os::macos::keychain::SecKeychain]>,
+) -> Result<Option<Vec<u8>>> {
+    use security_framework::os::macos::passwords::find_generic_password;
+    const ERR_ITEM_NOT_FOUND: i32 = -25300; // errSecItemNotFound
+    let (svc, acct) = keychain_identity_for(paths);
+    match find_generic_password(keychains, &svc, &acct) {
+        Ok((pwd, _item)) => {
+            let bytes = pwd.as_ref();
+            if bytes.len() != 32 {
+                bail!(
+                    "keychain entry has invalid length {}; expected 32 — re-enroll with `grindvakt service enroll-credential`",
+                    bytes.len()
+                );
+            }
+            Ok(Some(bytes.to_vec()))
+        }
+        Err(e) => {
+            if e.code() == ERR_ITEM_NOT_FOUND {
+                // Try legacy global identity (read-only compatibility)
+                match find_generic_password(keychains, "grindvakt", "grindvakt.dek") {
+                    Ok((pwd, _item)) => {
+                        let bytes = pwd.as_ref();
+                        if bytes.len() != 32 {
+                            bail!(
+                                "legacy keychain entry has invalid length {}; expected 32 — re-enroll with `grindvakt service enroll-credential`",
+                                bytes.len()
+                            );
+                        }
+                        return Ok(Some(bytes.to_vec()));
+                    }
+                    Err(e2) => {
+                        if e2.code() == ERR_ITEM_NOT_FOUND {
+                            return Ok(None);
+                        }
+                        return Err(anyhow::anyhow!("keychain lookup failed: {}", e2));
+                    }
+                }
+            }
+            Err(anyhow::anyhow!("keychain lookup failed: {}", e))
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn store_unattended_keychain_dek_scoped(
+    paths: &ConfigPaths,
+    dek: &[u8],
+    keychain: Option<&security_framework::os::macos::keychain::SecKeychain>,
+) -> Result<()> {
+    let (svc, acct) = keychain_identity_for(paths);
+    if let Some(kc) = keychain {
+        kc.set_generic_password(&svc, &acct, dek)
+            .context("store DEK in Keychain")?;
+    } else {
+        security_framework::passwords::set_generic_password(&svc, &acct, dek)
+            .context("store DEK in Keychain")?;
+    }
+    Ok(())
+}
+
 // Upper bounds to avoid pathological resource use
 const ARGON2_MAX_MEMORY_MIB: u32 = 64;
 const ARGON2_MAX_ITERATIONS: u32 = 6;
@@ -467,11 +548,16 @@ pub async fn unlock_token_for_provider_interactive(
     // On macOS, also try Keychain generic password (service=grindvakt, account=grindvakt.dek)
     #[cfg(target_os = "macos")]
     if ctx.allow_unattended
-        && let Ok(data) =
-            security_framework::passwords::get_generic_password("grindvakt", "grindvakt.dek")
-        && data.len() == 32
+        && let Some(data) = try_unattended_keychain_dek_scoped(ctx.paths, None)?
     {
         return unlock_provider_with_dek(ctx.paths, &data, provider);
+    }
+    // If unattended was requested under launchd (no TTY), return actionable guidance instead of attempting a prompt.
+    #[cfg(target_os = "macos")]
+    if ctx.allow_unattended && !stdin_is_tty() {
+        bail!(
+            "unattended credential not found in Keychain; run `grindvakt service enroll-credential`"
+        );
     }
     let vault = load_vault(&ctx.paths.vault_file)?;
     check_vault_supported(&vault)?;
@@ -503,7 +589,12 @@ fn unlock_provider_with_dek(
                 aad: AAD_CONTEXT.as_bytes(),
             },
         )
-        .map_err(|e| anyhow::anyhow!("decrypt secrets: {}", e))?;
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "decrypt secrets: {} (stale/wrong unattended credential?). Rerun `grindvakt service enroll-credential`.",
+                e
+            )
+        })?;
     let comp: Secrets =
         serde_json::from_slice(&pt).map_err(|e| anyhow::anyhow!("parse secrets: {}", e))?;
     let out = match provider {
@@ -659,10 +750,12 @@ impl<'a> CredentialEnrollment<'a> {
         if dek.len() != 32 {
             bail!("unexpected DEK length");
         }
-        security_framework::passwords::set_generic_password("grindvakt", "grindvakt.dek", &dek)
-            .context("store DEK in Keychain")?;
+        // Store using default keychain in production
+        store_unattended_keychain_dek_scoped(self.paths, &dek, None)?;
+        let (svc, acct) = keychain_identity_for(self.paths);
         println!(
-            "Enrolled unattended credential in Keychain (service=grindvakt, account=grindvakt.dek)"
+            "Enrolled unattended credential in Keychain (service={}, account={})",
+            svc, acct
         );
         Ok(())
     }
@@ -776,6 +869,11 @@ fn aead_encrypt_detached(
         )
         .map_err(|e| anyhow::anyhow!("aead encrypt: {}", e))?;
     Ok((nonce, ct))
+}
+
+#[cfg(target_os = "macos")]
+fn stdin_is_tty() -> bool {
+    unsafe { libc::isatty(libc::STDIN_FILENO) == 1 }
 }
 
 #[cfg(target_os = "linux")]
@@ -997,6 +1095,126 @@ mod tests {
         assert!(bad_res.is_err());
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_identity_derivation_scoped_stable() {
+        let base = TempDir::new().unwrap();
+        let p1 = ConfigPaths {
+            data_dir: base.path().join("data1"),
+            config_file: base.path().join("data1/config.toml"),
+            vault_file: base.path().join("data1/vault.json"),
+            credstore_dir: base.path().join("credstore.encrypted"),
+        };
+        let p2 = ConfigPaths {
+            data_dir: base.path().join("data2"),
+            config_file: base.path().join("data2/config.toml"),
+            vault_file: base.path().join("data2/vault.json"),
+            credstore_dir: base.path().join("credstore.encrypted"),
+        };
+        let (svc1, acct1) = keychain_identity_for(&p1);
+        let (svc2, acct2) = keychain_identity_for(&p2);
+        assert_eq!(svc1, "grindvakt");
+        assert_eq!(svc2, "grindvakt");
+        assert_ne!(acct1, acct2);
+        assert!(acct1.starts_with("grindvakt.dek:"));
+        assert!(acct2.starts_with("grindvakt.dek:"));
+        let (svc1b, acct1b) = keychain_identity_for(&p1);
+        assert_eq!(svc1, svc1b);
+        assert_eq!(acct1, acct1b);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn mac_keychain_isolated_enroll_lookup_and_decrypt() {
+        use crate::config::Provider;
+        use security_framework::os::macos::keychain::{CreateOptions, SecKeychain};
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path();
+        let kc: SecKeychain = CreateOptions::new()
+            .password("pw")
+            .create(base.join("Test.keychain-db"))
+            .expect("create keychain");
+        let paths = ConfigPaths {
+            data_dir: base.join("data"),
+            config_file: base.join("data/config.toml"),
+            vault_file: base.join("data/vault.json"),
+            credstore_dir: base.join("credstore.encrypted"),
+        };
+        fs::create_dir_all(&paths.data_dir).unwrap();
+        // Build vault with known token
+        let dek = random_bytes(32);
+        let dek_arr: [u8; 32] = dek.clone().try_into().expect("32-byte DEK");
+        let (n, ct) = aead_encrypt_detached(
+            &dek,
+            br#"{"dnsimple_token":"tok_X"}"#,
+            AAD_CONTEXT.as_bytes(),
+        )
+        .unwrap();
+        let v = VaultFile {
+            version: VAULT_VERSION,
+            kdf: KdfParams::default(),
+            salt_password: B64.encode([0u8; 16]),
+            salt_recovery: B64.encode([0u8; 16]),
+            dek_wrapped_by_password: B64
+                .encode(aead_seal(&dek_arr, &dek, AAD_CONTEXT.as_bytes()).unwrap()),
+            dek_wrapped_by_recovery: B64
+                .encode(aead_seal(&dek_arr, &dek, AAD_CONTEXT.as_bytes()).unwrap()),
+            secrets_aead_nonce: B64.encode(n),
+            secrets_aead_ciphertext: B64.encode(ct),
+            created_unix: 0,
+        };
+        fs::write(&paths.vault_file, serde_json::to_vec(&v).unwrap()).unwrap();
+        // Store DEK into the explicit keychain
+        store_unattended_keychain_dek_scoped(&paths, &dek, Some(&kc)).expect("store in keychain");
+        // Lookup via explicit keychain list and decrypt
+        let found = try_unattended_keychain_dek_scoped(&paths, Some(&[kc])).unwrap();
+        assert!(found.is_some());
+        let token = unlock_provider_with_dek(&paths, &found.unwrap(), Provider::Dnsimple).unwrap();
+        assert_eq!(token.expose_secret(), "tok_X");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_keychain_missing_returns_none() {
+        use security_framework::os::macos::keychain::{CreateOptions, SecKeychain};
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path();
+        let kc: SecKeychain = CreateOptions::new()
+            .password("pw")
+            .create(base.join("Test.keychain-db"))
+            .expect("create keychain");
+        let paths = ConfigPaths {
+            data_dir: base.join("data"),
+            config_file: base.join("data/config.toml"),
+            vault_file: base.join("data/vault.json"),
+            credstore_dir: base.join("credstore.encrypted"),
+        };
+        let res = try_unattended_keychain_dek_scoped(&paths, Some(&[kc])).unwrap();
+        assert!(res.is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_keychain_wrong_length_is_error() {
+        use security_framework::os::macos::keychain::{CreateOptions, SecKeychain};
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path();
+        let kc: SecKeychain = CreateOptions::new()
+            .password("pw")
+            .create(base.join("Test.keychain-db"))
+            .expect("create keychain");
+        let paths = ConfigPaths {
+            data_dir: base.join("data"),
+            config_file: base.join("data/config.toml"),
+            vault_file: base.join("data/vault.json"),
+            credstore_dir: base.join("credstore.encrypted"),
+        };
+        store_unattended_keychain_dek_scoped(&paths, b"short", Some(&kc))
+            .expect("store in keychain");
+        let err = try_unattended_keychain_dek_scoped(&paths, Some(&[kc])).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("invalid length"));
+    }
     #[cfg(target_os = "linux")]
     #[test]
     fn systemd_creds_encrypt_args_include_explicit_credential_name() {
