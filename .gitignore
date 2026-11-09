@@ -13,6 +13,7 @@ node_modules/
 /tmp/
 .coverage
 dist/
+__pycache__/
 
 
 agent-tools/

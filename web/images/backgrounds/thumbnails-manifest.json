@@ -1,0 +1,52 @@
+{
+  "files": [
+    {
+      "filename": "grindvakt-viking-1920x1080-thumb.webp",
+      "width": 640,
+      "height": 360,
+      "bytes": 23294,
+      "sha256": "94dd1e76b6b97c588e52a71ce1d80a65796d981088c5b3df71c61b7f4004cb39",
+      "source": "grindvakt-viking-1920x1080.png"
+    },
+    {
+      "filename": "grindvakt-viking-2560x1440-thumb.webp",
+      "width": 640,
+      "height": 360,
+      "bytes": 22726,
+      "sha256": "5cf4d8de0108909127e9a06b96af6bcbd8839fe7250c0a14d8fb8fd490ab963b",
+      "source": "grindvakt-viking-2560x1440.png"
+    },
+    {
+      "filename": "grindvakt-viking-3840x2160-thumb.webp",
+      "width": 640,
+      "height": 360,
+      "bytes": 22580,
+      "sha256": "6d5872181a7b0550e9c3c10fe9d582bfa4d5e83cc06b03b4e9cef443303bcebb",
+      "source": "grindvakt-viking-3840x2160.png"
+    },
+    {
+      "filename": "grindvakt-viking-1920x1200-thumb.webp",
+      "width": 640,
+      "height": 400,
+      "bytes": 21852,
+      "sha256": "418872a95f0e6bdbcc62d62bd4fcb77604b17dffd05f5d560f6675f9d20a3003",
+      "source": "grindvakt-viking-1920x1200.png"
+    },
+    {
+      "filename": "grindvakt-viking-2560x1600-thumb.webp",
+      "width": 640,
+      "height": 400,
+      "bytes": 21578,
+      "sha256": "192623b977c550acdb646f72f8091d7769e111c8da3d734c6986b234a0c1e7a3",
+      "source": "grindvakt-viking-2560x1600.png"
+    },
+    {
+      "filename": "grindvakt-viking-3440x1440-thumb.webp",
+      "width": 640,
+      "height": 268,
+      "bytes": 20868,
+      "sha256": "699135c6861d99ea932c0063fd8d7f487cf3377b27d3e2d3bffcb44e1b586be0",
+      "source": "grindvakt-viking-3440x1440.png"
+    }
+  ]
+}
