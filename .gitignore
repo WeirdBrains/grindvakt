@@ -1,19 +1,30 @@
-target/
-**/target/
-*.tar.gz
-*.tgz
-.DS_Store
-/.env
-/.idea/
-/.vscode/
-node_modules/
-*.swp
-*.swo
+# Files and directories created by pub.
+**/doc/api/
+.dart_tool/
+.packages
+
+# Conventional directory for build output.
+/build/
+
+# Miscellaneous
+*.class
 *.log
-/tmp/
-.coverage
-dist/
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
 
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
 
-agent-tools/
-/bin/
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/

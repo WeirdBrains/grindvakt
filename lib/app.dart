@@ -1,8 +1,8 @@
 import 'package:jaspr/jaspr.dart';
 import 'package:jaspr/dom.dart';
 
-class GrindvaktSite extends StatelessComponent {
-  const GrindvaktSite({super.key});
+class Grindvakt extends StatelessComponent {
+  const Grindvakt({super.key});
 
   @override
   Component build(BuildContext context) {
@@ -12,7 +12,7 @@ class GrindvaktSite extends StatelessComponent {
       header(classes: 'site-header', [
         a(href: '#', classes: 'brand', [
           img(
-            src: '/assets/grindvakt-guard-logo.jpg',
+            src: '/images/grindvakt-guard-logo.jpg',
             attributes: {'alt': 'Grindvakt guard logo'},
           ),
           .text('Grindvakt'),
@@ -51,6 +51,9 @@ class GrindvaktSite extends StatelessComponent {
                 ),
               ]),
               div(classes: 'cta', [
+                a(href: 'https://github.com/WeirdBrains/grindvakt/releases/tag/v0.5.0', classes: 'btn version',
+                  [.text('v0.5.0')],
+                ),
                 a(
                   href: 'https://github.com/WeirdBrains/grindvakt/releases/latest',
                   classes: 'btn primary',
@@ -64,7 +67,7 @@ class GrindvaktSite extends StatelessComponent {
             div(classes: 'hero-right', [
               // Use the existing guard logo prominently as the hero ornament.
               img(
-                src: '/assets/grindvakt-guard-logo.jpg',
+                src: '/images/grindvakt-guard-logo.jpg',
                 classes: 'mjolnir',
                 attributes: {'alt': '', 'aria-hidden': 'true'},
               ),
@@ -216,7 +219,7 @@ interval_secs = 300
           ]),
           div(classes: 'wallpaper-preview', [
             img(
-              src: '/assets/backgrounds/grindvakt-viking-preview.webp',
+              src: '/images/backgrounds/grindvakt-viking-preview.webp',
               attributes: {
                 'alt': 'Grindvakt wallpaper preview',
                 'loading': 'lazy',
@@ -256,8 +259,8 @@ interval_secs = 300
   }
 
   Component _bgCard(String size) {
-    final href = '/assets/backgrounds/grindvakt-viking-$size.png';
-    final thumb = '/assets/backgrounds/grindvakt-viking-$size-thumb.webp';
+    final href = '/images/backgrounds/grindvakt-viking-$size.png';
+    final thumb = '/images/backgrounds/grindvakt-viking-$size-thumb.webp';
     final label = size == '3840x2160'
         ? '3840 × 2160 (4K, upscaled)'
         : size.replaceAll('x', ' × ');

@@ -1,12 +1,12 @@
 import 'package:jaspr/server.dart';
-import 'package:grindvakt_site/main.dart' as site;
+import 'app.dart' as app;
 
 void main() {
   Jaspr.initializeApp();
   runApp(
     Document(
       title: 'Grindvakt — Secure dynamic DNS updater',
-      body: const site.GrindvaktSite(),
+      body: const app.Grindvakt(),
     ),
   );
 }
