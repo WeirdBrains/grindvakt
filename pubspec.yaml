@@ -1,6 +1,6 @@
 name: grindvakt
 description: Secure dynamic DNS updater
-version: 0.6.1
+version: 0.6.2
 
 environment:
   sdk: ^3.10.0
