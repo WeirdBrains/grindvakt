@@ -33,17 +33,17 @@ jobs:
         run: dart pub global activate jaspr_cli 0.23.5
 
       - name: Resolve site dependencies
-        working-directory: website
+        working-directory: ./
         run: dart pub get
 
       - name: Build static site
-        working-directory: website
+        working-directory: ./
         run: dart pub global run jaspr_cli:jaspr build
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: website/build/jaspr
+          path: ./build/jaspr
 
   deploy:
     environment:
