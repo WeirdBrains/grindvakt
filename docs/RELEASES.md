@@ -3,7 +3,7 @@
 The canonical entrypoint is:
 
 ```bash
-scripts/release/release.sh [--dry-run] [--resume] [--patch|--major] [--to X.Y.Z]
+scripts/release/release.py [--dry-run] [--resume] [--patch|--major] [--to X.Y.Z]
 ```
 
 Behavior
@@ -34,4 +34,5 @@ Notes
 
 - The script never moves or overwrites existing tags (local or remote).
 - Dry-run is strictly read-only and does not fetch; tag/branch checks use `git ls-remote` only.
+ 
 
