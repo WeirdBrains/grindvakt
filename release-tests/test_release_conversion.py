@@ -43,6 +43,8 @@ class Fixture:
         self.index = {
             "Cargo.toml": ("100644", "a" * 40),
             "Cargo.lock": ("100644", "b" * 40),
+            "pubspec.yaml": ("100644", "e" * 40),
+            "lib/app.dart": ("100644", "f" * 40),
             "other.txt": ("100644", "c" * 40),
         }
         self.post_mismatch = False
@@ -58,6 +60,19 @@ class Fixture:
             'version = 4\n\n[[package]]\nname = "dependency"\nversion = "1.2.3"\n\n[[package]]\nname = "grindvakt"\nversion = "'
             + v
             + '"\n'
+        )
+        (self.root / "pubspec.yaml").write_text("name: grindvakt\nversion: " + v + "\n\nenvironment:\n  sdk: ^3.10.0\n")
+        app = self.root / "lib" / "app.dart"
+        app.parent.mkdir(parents=True, exist_ok=True)
+        app.write_text(
+            "const String appVersion = '"
+            + v
+            + "';\n\n"
+            + "a(\n"
+            + "  href: 'https://github.com/WeirdBrains/grindvakt/releases/tag/v$appVersion',\n"
+            + "  classes: 'btn version',\n"
+            + "  [.text('v$appVersion')],\n"
+            + "),\n"
         )
 
     def run(self, cmd, **kw):
@@ -182,6 +197,10 @@ class Tests(unittest.TestCase):
         except SystemExit as ex:
             return ex.code
 
+    def version_bytes(self):
+        names = ["Cargo.toml", "Cargo.lock", "pubspec.yaml", "lib/app.dart"]
+        return {n: (self.root / n).read_bytes() for n in names}
+
     def resume(self, tag=True):
         self.f.write_version("0.5.0")
         self.f.head = N
@@ -232,6 +251,11 @@ class Tests(unittest.TestCase):
             self.f.calls,
         )
         self.assertEqual(mod.read_cur_version(self.root), "0.5.0")
+        self.assertEqual(mod.read_pubspec_version(self.root), "0.5.0")
+        self.assertEqual(mod.read_app_dart_version(self.root), "0.5.0")
+        app = (self.root / "lib" / "app.dart").read_text()
+        self.assertIn("releases/tag/v$appVersion", app)
+        self.assertIn(".text('v$appVersion')", app)
 
     def test_patch_and_major(self):
         self.assertEqual(self.call("--patch", "--dry-run"), 0)
@@ -294,7 +318,7 @@ class Tests(unittest.TestCase):
         self.assertNotEqual(self.call("--resume"), 0)
 
     def test_missing_cargo_restores_files(self):
-        before = {n: (self.root / n).read_bytes() for n in ["Cargo.toml", "Cargo.lock"]}
+        before = self.version_bytes()
         original = self.f.run
 
         def missing(cmd, **kw):
@@ -313,7 +337,7 @@ class Tests(unittest.TestCase):
 
     def test_gates_failure_restores_files_and_index(self):
         self.f.fail = "fmt"
-        before = {n: (self.root / n).read_bytes() for n in ["Cargo.toml", "Cargo.lock"]}
+        before = self.version_bytes()
         index = self.f.index.copy()
         self.assertNotEqual(self.call(), 0)
         self.assertEqual(before, {n: (self.root / n).read_bytes() for n in before})
@@ -327,7 +351,7 @@ class Tests(unittest.TestCase):
 
     def test_commit_failure_preserves_unrelated_stage(self):
         self.f.fail = "commit"
-        before = {n: (self.root / n).read_bytes() for n in ["Cargo.toml", "Cargo.lock"]}
+        before = self.version_bytes()
         index = self.f.index.copy()
         self.assertNotEqual(self.call(), 0)
         self.assertEqual(before, {n: (self.root / n).read_bytes() for n in before})
@@ -386,7 +410,7 @@ class Tests(unittest.TestCase):
 
     def test_git_add_failure_restores_files_and_stage(self):
         self.f.fail = "add"
-        before = {n: (self.root / n).read_bytes() for n in ["Cargo.toml", "Cargo.lock"]}
+        before = self.version_bytes()
         index = self.f.index.copy()
         self.assertNotEqual(self.call(), 0)
         self.assertEqual(before, {n: (self.root / n).read_bytes() for n in before})

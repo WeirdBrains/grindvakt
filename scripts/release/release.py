@@ -6,7 +6,8 @@
 # - --dry-run performs read-only validations (no file edits, commits, tags, or pushes) and exits early.
 # - --resume safely resumes a previous attempt (see docs/RELEASES.md for exact invariants).
 # - Strict safety checks: clean tree, on main tracking origin/main, monotonic version, atomic push, post-verify.
-# - Updates Cargo.toml [package] version and the root package entry in Cargo.lock, then runs gates:
+# - Updates Cargo.toml [package] version, the root package entry in Cargo.lock,
+#   the pubspec.yaml version, and the version link in lib/app.dart, then runs gates:
 #   fmt, clippy, test, build (only on non-dry-run new releases).
 #
 # NOTE: This script uses only the Python standard library.
@@ -31,6 +32,24 @@ except Exception:
 
 
 RE_SEMVER = re.compile(r"^([1-9][0-9]*|0)\.([1-9][0-9]*|0)\.([1-9][0-9]*|0)\Z")
+
+# Rewritten on a fresh release and restored together if a pre-commit step fails.
+# Cargo.lock may be absent; the others are required when a release is cut.
+RELEASE_VERSION_FILES = (
+    "Cargo.toml",
+    "Cargo.lock",
+    "pubspec.yaml",
+    "lib/app.dart",
+)
+
+# Single source for the hero version control. The anchor href and label both
+# interpolate $appVersion, so the link always targets the current release tag.
+RE_APP_VERSION = re.compile(r"^const String appVersion = '([0-9]+\.[0-9]+\.[0-9]+)';\s*$", re.M)
+RE_APP_VERSION_LINK = re.compile(
+    r"href:\s*'https://github\.com/WeirdBrains/grindvakt/releases/tag/v\$appVersion'\s*,\s*"
+    r"classes:\s*'btn version'\s*,\s*\[\s*\.text\('v\$appVersion'\)",
+    re.S,
+)
 
 
 def is_semver(s: str) -> bool:
@@ -90,6 +109,57 @@ def set_root_version_in_lock(root: Path, new_version: str) -> None:
         raise RuntimeError("failed to locate root package in Cargo.lock")
     new_lock = pat.sub(r"\g<1>" + new_version + r"\3", lock, count=1)
     (root / "Cargo.lock").write_text(new_lock, encoding="utf-8")
+
+
+def set_version_in_pubspec(root: Path, new_version: str) -> None:
+    path = root / "pubspec.yaml"
+    text = path.read_text(encoding="utf-8")
+    new_text, n = re.subn(
+        r"^(version:\s*)([0-9]+\.[0-9]+\.[0-9]+)([^\n]*)$",
+        r"\g<1>" + new_version + r"\3",
+        text,
+        count=1,
+        flags=re.M,
+    )
+    if n != 1:
+        raise RuntimeError("failed to locate version in pubspec.yaml")
+    path.write_text(new_text, encoding="utf-8")
+
+
+def read_pubspec_version(root: Path) -> str | None:
+    path = root / "pubspec.yaml"
+    if not path.is_file():
+        return None
+    m = re.search(r"^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\b", path.read_text(encoding="utf-8"), re.M)
+    return m.group(1) if m else None
+
+
+def set_version_in_app_dart(root: Path, new_version: str) -> None:
+    path = root / "lib" / "app.dart"
+    text = path.read_text(encoding="utf-8")
+    if not RE_APP_VERSION_LINK.search(text):
+        raise RuntimeError("failed to locate version link in lib/app.dart")
+    new_text, n = re.subn(
+        r"^(const String appVersion = ')([0-9]+\.[0-9]+\.[0-9]+)(';)\s*$",
+        r"\g<1>" + new_version + r"\3",
+        text,
+        count=1,
+        flags=re.M,
+    )
+    if n != 1:
+        raise RuntimeError("failed to locate appVersion in lib/app.dart")
+    path.write_text(new_text, encoding="utf-8")
+
+
+def read_app_dart_version(root: Path) -> str | None:
+    path = root / "lib" / "app.dart"
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    if not RE_APP_VERSION_LINK.search(text):
+        return None
+    m = RE_APP_VERSION.search(text)
+    return m.group(1) if m else None
 
 
 def ensure_clean_main_tracking(root: Path) -> None:
@@ -262,6 +332,10 @@ def main(argv: list[str]) -> int:
         m = re.search(r'(?ms)^\[\[package\]\]\s*name = "grindvakt"\s*version = "([0-9]+\.[0-9]+\.[0-9]+)"', lock)
         if not (m and m.group(1) == new):
             die("resume: Cargo.lock root package version does not match Cargo.toml/release (%s)" % new)
+        if read_pubspec_version(root) != new:
+            die("resume: pubspec.yaml version does not match Cargo.toml/release (%s)" % new)
+        if read_app_dart_version(root) != new:
+            die("resume: lib/app.dart version link does not match Cargo.toml/release (%s)" % new)
         # Monotonic safety even on resume
         maxv = "0.0.0"
         cp_r = run(["git", "ls-remote", "--tags", "--refs", "origin", "v[0-9]*.[0-9]*.[0-9]*"], capture_output=True, cwd=root)
@@ -328,16 +402,8 @@ def main(argv: list[str]) -> int:
         bakdir = Path(tempfile.mkdtemp(prefix="grindvakt-release-"))
         committed = False
         try:
-            # Backup working versions
-            shutil.copy2(root / "Cargo.toml", bakdir / "Cargo.toml.bak")
-            if (root / "Cargo.lock").exists():
-                shutil.copy2(root / "Cargo.lock", bakdir / "Cargo.lock.bak")
-            # Remember index entries
-            idx_toml = run(["git", "ls-files", "-s", "--", "Cargo.toml"], capture_output=True, cwd=root).stdout
-            idx_lock = run(["git", "ls-files", "-s", "--", "Cargo.lock"], capture_output=True, cwd=root).stdout
-            # In-memory originals as an additional safety net (restored on any exception)
-            orig_toml_bytes = (root / "Cargo.toml").read_bytes()
-            orig_lock_bytes = (root / "Cargo.lock").read_bytes() if (root / "Cargo.lock").exists() else None
+            # Backup working versions and their index entries
+            orig_bytes, index_entries = _backup_version_files(root, bakdir)
             try:
                 # Write versions
                 set_version_in_cargo_toml(root, new)
@@ -346,8 +412,14 @@ def main(argv: list[str]) -> int:
                     set_root_version_in_lock(root, new)
                 except Exception:
                     # Restore if update fails
-                    _restore_files_and_index(root, bakdir, idx_toml, idx_lock)
+                    _restore_files_and_index(root, bakdir, index_entries)
                     die("lock root update failed")
+                try:
+                    set_version_in_pubspec(root, new)
+                    set_version_in_app_dart(root, new)
+                except Exception:
+                    _restore_files_and_index(root, bakdir, index_entries)
+                    die("pubspec.yaml or lib/app.dart version update failed")
                 # Gates (short-circuit on first failure)
                 for gate in (
                     ["cargo", "fmt", "--all", "--check"],
@@ -356,14 +428,14 @@ def main(argv: list[str]) -> int:
                     ["cargo", "build", "--release", "--locked"],
                 ):
                     if run(gate, cwd=root, capture_output=True, check=False).returncode != 0:
-                        _restore_files_and_index(root, bakdir, idx_toml, idx_lock)
+                        _restore_files_and_index(root, bakdir, index_entries)
                         die("gates failed")
                 # Stage and commit
-                if run(["git", "add", "Cargo.toml", "Cargo.lock"], cwd=root, check=False).returncode != 0:
-                    _restore_files_and_index(root, bakdir, idx_toml, idx_lock)
+                if run(["git", "add", *RELEASE_VERSION_FILES], cwd=root, check=False).returncode != 0:
+                    _restore_files_and_index(root, bakdir, index_entries)
                     die("git add failed")
                 if run(["git", "commit", "-m", f"release: v{new}"], cwd=root, check=False).returncode != 0:
-                    _restore_files_and_index(root, bakdir, idx_toml, idx_lock)
+                    _restore_files_and_index(root, bakdir, index_entries)
                     die("commit failed (pre-commit hook or other error)")
                 committed = True
                 # Create annotated tag
@@ -373,15 +445,8 @@ def main(argv: list[str]) -> int:
                 # Any pre-commit subprocess failure must restore files/index and propagate
                 if not committed:
                     # Write in-memory originals first to guarantee restoration even if bakdir is gone
-                    (root / "Cargo.toml").write_bytes(orig_toml_bytes)
-                    if orig_lock_bytes is None:
-                        try:
-                            (root / "Cargo.lock").unlink()
-                        except FileNotFoundError:
-                            pass
-                    else:
-                        (root / "Cargo.lock").write_bytes(orig_lock_bytes)
-                    _restore_files_and_index(root, bakdir, idx_toml, idx_lock)
+                    _restore_bytes(root, orig_bytes)
+                    _restore_files_and_index(root, bakdir, index_entries)
                 raise
         finally:
             shutil.rmtree(bakdir, ignore_errors=True)
@@ -411,28 +476,54 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-def _restore_files_and_index(root: Path, bakdir: Path, idx_toml: str, idx_lock: str) -> None:
-    # Restore working files
-    shutil.copy2(bakdir / "Cargo.toml.bak", root / "Cargo.toml")
-    bak_lock = bakdir / "Cargo.lock.bak"
-    if bak_lock.exists():
-        shutil.copy2(bak_lock, root / "Cargo.lock")
-    else:
-        try:
-            (root / "Cargo.lock").unlink()
-        except FileNotFoundError:
-            pass
-    # Restore index entries to pre-run state
-    if idx_toml.strip():
-        mode, sha = idx_toml.split()[0:2]
-        run(["git", "update-index", "--cacheinfo", mode, sha, "Cargo.toml"], cwd=root, check=False)
-    else:
-        run(["git", "restore", "--staged", "--", "Cargo.toml"], cwd=root, check=False)
-    if idx_lock.strip():
-        mode, sha = idx_lock.split()[0:2]
-        run(["git", "update-index", "--cacheinfo", mode, sha, "Cargo.lock"], cwd=root, check=False)
-    else:
-        run(["git", "restore", "--staged", "--", "Cargo.lock"], cwd=root, check=False)
+def _bak_name(rel: str) -> str:
+    return rel.replace("/", "__") + ".bak"
+
+
+def _backup_version_files(root: Path, bakdir: Path) -> tuple[dict[str, bytes | None], dict[str, str]]:
+    orig: dict[str, bytes | None] = {}
+    index_entries: dict[str, str] = {}
+    for rel in RELEASE_VERSION_FILES:
+        path = root / rel
+        index_entries[rel] = run(["git", "ls-files", "-s", "--", rel], capture_output=True, cwd=root).stdout
+        if path.is_file():
+            orig[rel] = path.read_bytes()
+            shutil.copy2(path, bakdir / _bak_name(rel))
+        else:
+            orig[rel] = None
+    return orig, index_entries
+
+
+def _restore_bytes(root: Path, orig: dict[str, bytes | None]) -> None:
+    for rel, data in orig.items():
+        dest = root / rel
+        if data is None:
+            try:
+                dest.unlink()
+            except FileNotFoundError:
+                pass
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+
+
+def _restore_files_and_index(root: Path, bakdir: Path, index_entries: dict[str, str]) -> None:
+    for rel, idx in index_entries.items():
+        bak = bakdir / _bak_name(rel)
+        dest = root / rel
+        if bak.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(bak, dest)
+        else:
+            try:
+                dest.unlink()
+            except FileNotFoundError:
+                pass
+        if idx.strip():
+            mode, sha = idx.split()[0:2]
+            run(["git", "update-index", "--cacheinfo", mode, sha, rel], cwd=root, check=False)
+        else:
+            run(["git", "restore", "--staged", "--", rel], cwd=root, check=False)
 
 
 def _try(cmd: list[str], root: Path) -> int:
