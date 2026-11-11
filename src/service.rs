@@ -1,10 +1,18 @@
 use crate::config::AppConfig;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use crate::fsutil::ensure_dir_0700;
-use anyhow::{Context, Result, bail};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use anyhow::Context;
+use anyhow::Result;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use anyhow::bail;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
 const SERVICE_NAME: &str = "grindvakt.service";
@@ -183,6 +191,7 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn validate_schedule(cfg: &AppConfig) -> Result<()> {
     // Forbid newlines and '%' specifiers; basic length check
     if let Some(cal) = &cfg.schedule.calendar
@@ -235,6 +244,14 @@ impl InstallUnits {
         println!(
             "Unattended credential (Keychain) recommended: run `grindvakt service enroll-credential`."
         );
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    pub async fn install(&self, cfg: &AppConfig, exe_path: &Path, data_dir: &Path) -> Result<()> {
+        crate::winservice::validate_schedule_windows(cfg)?;
+        crate::winservice::install_service(exe_path, data_dir)?;
+        println!("Note: service is manual-start. Use the MSI installer for production deployment.");
+        println!("Enroll unattended credential with: grindvakt service enroll-credential");
         Ok(())
     }
 }

@@ -1,3 +1,22 @@
+#![cfg(unix)]
+use grindvakt::fsutil::ensure_dir_0700;
+use std::fs;
+use tempfile::TempDir;
+
+#[test]
+fn ensure_dir_creates_secure_dir_unix() {
+    let t = TempDir::new().unwrap();
+    let p = t.path().join("secure");
+    ensure_dir_0700(&p).unwrap();
+    assert!(p.is_dir());
+    let md = fs::metadata(&p).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(md.permissions().mode() & 0o777, 0o700);
+    }
+}
+
 use assert_fs::prelude::*;
 use std::path::Path;
 

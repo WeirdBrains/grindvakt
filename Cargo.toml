@@ -1,6 +1,6 @@
 [package]
 name = "grindvakt"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.89"
 description = "Grindvakt — a user-mode DNS updater for DNSimple with secure local vault and systemd user timer"
@@ -73,6 +73,22 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7"
+
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Cryptography",
+  "Win32_Security_Authorization",
+  "Win32_System_Memory",
+  "Win32_System_Threading",
+  "Win32_System_Services",
+  "Win32_System_Diagnostics_Debug",
+  "Win32_Storage_FileSystem",
+] }
+windows-service = "0.7"
+widestring = "1.1"
 
 [dev-dependencies]
 assert_fs = "1.1"

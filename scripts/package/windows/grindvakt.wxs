@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Grindvakt" Language="1033" Version="$(var.ProductVersion)" Manufacturer="WeirdBrains" UpgradeCode="{6BB7E9C7-6F10-4C1D-8C7B-39E0D6C3B7C5}">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Grindvakt is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high"/>
+
+    <Feature Id="MainFeature" Title="Grindvakt" Level="1">
+      <ComponentRef Id="cmpExe"/>
+      <ComponentRef Id="cmpDocs"/>
+      <ComponentRef Id="cmpProgramData"/>
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Grindvakt">
+          <Component Id="cmpExe" Guid="{5B49C4B1-508C-447F-B9BE-3E2CFB86B0B3}">
+            <File Id="filExe" Source="$(var.ExeSource)" KeyPath="yes" Name="grindvakt.exe" />
+            <!-- Manual-start service running as LocalService; do not auto-start. -->
+            <ServiceInstall Id="svcInstall"
+                            Name="Grindvakt"
+                            DisplayName="Grindvakt DNS Updater"
+                            Description="Updates DNS A record on a schedule"
+                            Start="demand"
+                            Type="ownProcess"
+                            ErrorControl="normal"
+                            Vital="yes"
+                            Account="NT AUTHORITY\LocalService"
+                            Arguments="service run --data-dir=&quot;[ProgramDataFolder]Grindvakt&quot;" />
+            <ServiceControl Id="svcControl"
+                            Name="Grindvakt"
+                            Stop="both"
+                            Remove="uninstall"
+                            Wait="yes" />
+          </Component>
+          <Component Id="cmpDocs" Guid="{A9E2C2F3-6F73-4F79-BB10-7E9B0A42D9B4}">
+            <File Id="filReadme" Source="$(var.RepoRoot)\README.md" Name="README.md" KeyPath="yes" />
+            <File Id="filImplNotes" Source="$(var.RepoRoot)\docs\IMPLEMENTATION_NOTES.md" Name="IMPLEMENTATION_NOTES.md" />
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramDataFolder">
+        <Directory Id="ProgramDataGrindvakt" Name="Grindvakt">
+          <Component Id="cmpProgramData" Guid="{0F610D7E-43D9-4D35-9C0E-7B4E0B66F69A}" Permanent="yes" NeverOverwrite="yes" KeyPath="yes">
+            <!-- Secure ProgramData\Grindvakt: Owner/Group SYSTEM; protected DACL; LocalService allowed -->
+            <CreateFolder>
+              <PermissionEx Sddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)"/>
+            </CreateFolder>
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+  </Product>
+</Wix>

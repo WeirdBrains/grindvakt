@@ -14,6 +14,7 @@ Key components
 - `src/service.rs`:
   - Linux: systemd --user oneshot `grindvakt.service` and configurable `grindvakt.timer`. Optional TPM2-bound unattended credential enrollment via `systemd-creds --user encrypt --with-key=host+tpm2` producing `~/.config/systemd/user/credstore.encrypted/grindvakt.dek.enc` and `LoadCredentialEncrypted=` in the unit.
   - macOS: per-user launchd agent `.plist` with `ProgramArguments = [<exe>, sync, --data-dir=...]`, `StartInterval` for interval schedules, and simple StartCalendarInterval mapping for `daily`. Logs to `~/Library/Logs/Grindvakt/`. CLI prints and installs the agent but does not load it.
+  - Windows: SCM service under `NT AUTHORITY\\LocalService`, manual start. Program data at `%PROGRAMDATA%\\Grindvakt`; service log `service.log` lives there. Unattended credential is a machine‑scoped DPAPI blob at `%PROGRAMDATA%\\Grindvakt\\credentials\\grindvakt.dek.dpapi`. The ProgramData directory is created with a protected DACL (SYSTEM/Administrators/LocalService only); user‑owned preexisting directories are rejected.
 - `src/config.rs`: TOML config parser and normalizer, with schedule either `interval_secs` (default 300) or `calendar`.
 - `src/lock.rs`: Flock preventing overlap (service/manual).
 

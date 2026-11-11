@@ -20,6 +20,9 @@ jobs:
     env:
       TAG_REF: ${{ github.ref_name }}
       RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
+    outputs:
+      rel_tag: ${{ steps.ver.outputs.rel_tag }}
+      cargo: ${{ steps.cargo.outputs.cargo }}
     steps:
       - name: Checkout
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -82,7 +85,7 @@ jobs:
           cargo fmt --all -- --check
           cargo check --all-targets --locked
           cargo test --all --locked
-          cargo clippy --all-targets --all-features -- -D warnings
+          cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Build portable musl binary (x86_64)
         shell: bash
@@ -151,21 +154,188 @@ jobs:
         shell: bash
         run: |
           sudo chown -R "$(id -u)":"$(id -g)" dist
+
       - name: Create SHA256SUMS
         shell: bash
         run: |
-          (cd dist && sha256sum * > SHA256SUMS)
+          (cd dist && sha256sum -- * > SHA256SUMS)
 
       - name: Upload release
         uses: softprops/action-gh-release@69320dbe05506a9a39fc8ae11030b214ec2d1f87 # v2.0.5
         with:
           tag_name: ${{ steps.ver.outputs.rel_tag }}
           name: ${{ steps.ver.outputs.rel_tag }}
+          fail_on_unmatched_files: true
           body: |
             Automated release for ${{ steps.ver.outputs.rel_tag }}.
-            Includes portable x86_64 musl binary (.tar.gz) and native installers (.deb, .rpm, .pkg.tar.zst).
+            Includes portable x86_64 musl binary (.tar.gz), native Linux installers (.deb, .rpm, .pkg.tar.zst), a macOS ARM64 .pkg, and a Windows x64 .msi. macOS and Windows installers are attached by follow-on jobs and are unsigned.
           files: |
-            dist/*
+            dist/grindvakt-x86_64-musl.tar.gz
+            dist/grindvakt_${{ steps.cargo.outputs.cargo }}_amd64.deb
+            dist/grindvakt-${{ steps.cargo.outputs.cargo }}-1.x86_64.rpm
+            dist/grindvakt-${{ steps.cargo.outputs.cargo }}-1-x86_64.pkg.tar.zst
+            dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  macos-pkg:
+    name: macOS ARM64 package
+    needs: release
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Assert ARM64 runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          if [ "$arch" != "arm64" ]; then
+            echo "Expected arm64 macOS runner, got: $arch" >&2
+            exit 1
+          fi
+
+      - name: Checkout release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          git checkout "refs/tags/${{ needs.release.outputs.rel_tag }}"
+
+      - name: Setup Rust 1.99.1 with fmt/clippy
+        shell: bash
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.99.1
+
+      - name: Quality gates (fmt/check/test/clippy)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo check --all-targets --locked
+          cargo test --all --locked
+          cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Build release binary
+        shell: bash
+        run: cargo build --release --locked
+
+      - name: Build unsigned ARM64 pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/package/macos/make-pkg.sh
+          mkdir -p dist
+          pkg="target/grindvakt-${{ needs.release.outputs.cargo }}-macos-arm64.pkg"
+          test -f "$pkg"
+          cp "$pkg" dist/
+          (cd dist && shasum -a 256 -- "grindvakt-${{ needs.release.outputs.cargo }}-macos-arm64.pkg" > "grindvakt-${{ needs.release.outputs.cargo }}-macos-arm64.pkg.sha256")
+
+      - name: Upload macOS assets
+        uses: softprops/action-gh-release@69320dbe05506a9a39fc8ae11030b214ec2d1f87 # v2.0.5
+        with:
+          tag_name: ${{ needs.release.outputs.rel_tag }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/grindvakt-${{ needs.release.outputs.cargo }}-macos-arm64.pkg
+            dist/grindvakt-${{ needs.release.outputs.cargo }}-macos-arm64.pkg.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows-msi:
+    name: Windows x64 MSI
+    needs: release
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Checkout release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          git checkout "refs/tags/${{ needs.release.outputs.rel_tag }}"
+
+      - name: Isolate Windows test paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $pd = Join-Path $env:RUNNER_TEMP "programdata"
+          New-Item -ItemType Directory -Force -Path $pd | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:RUNNER_TEMP | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "PROGRAMDATA=$pd"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+
+      - name: Setup Rust 1.99.1 with fmt/clippy
+        shell: bash
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+          rustup default 1.99.1
+
+      - name: Quality gates (fmt/check/test/clippy)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo check --all-targets --locked
+          cargo test --all --locked
+          cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Build release binary
+        shell: bash
+        run: cargo build --release --locked
+
+      - name: Install pinned WiX 3.14.1
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
+          $expected = "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31"
+          $zip = Join-Path $env:RUNNER_TEMP "wix314-binaries.zip"
+          $dest = Join-Path $env:RUNNER_TEMP "wix314"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "WiX zip hash mismatch: $actual != $expected"
+          }
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
+          Add-Content -Path $env:GITHUB_PATH -Value $dest
+
+      - name: Build unsigned MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path (Get-Location) "target\release\grindvakt.exe"
+          if (!(Test-Path -LiteralPath $exe)) { throw "missing $exe" }
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+          powershell -File "scripts\package\windows\make-msi.ps1" -ExeSource $exe -ProductVersion "${{ needs.release.outputs.cargo }}" -OutDir (Join-Path (Get-Location) "dist")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $msi = "dist\grindvakt-${{ needs.release.outputs.cargo }}-windows-x64.msi"
+          if (!(Test-Path -LiteralPath $msi)) { throw "missing $msi" }
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $msi).Hash.ToLowerInvariant()
+          $name = [IO.Path]::GetFileName($msi)
+          Set-Content -Path ($msi + ".sha256") -Value ($hash + "  " + $name) -NoNewline
+
+      - name: Upload Windows assets
+        uses: softprops/action-gh-release@69320dbe05506a9a39fc8ae11030b214ec2d1f87 # v2.0.5
+        with:
+          tag_name: ${{ needs.release.outputs.rel_tag }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/grindvakt-${{ needs.release.outputs.cargo }}-windows-x64.msi
+            dist/grindvakt-${{ needs.release.outputs.cargo }}-windows-x64.msi.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

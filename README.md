@@ -35,6 +35,16 @@ Install user service without enabling
 - To enable timer later on Linux (requires active user manager; linger remains unchanged):
   - `systemctl --user enable --now grindvakt.timer`
 
+Windows service
+- Manual-start Windows service installed to run under `NT AUTHORITY\\LocalService`.
+- Program data directory: `%PROGRAMDATA%\\Grindvakt` (service log `service.log` is written here).
+- Unattended credential (machine-scoped DPAPI) path: `%PROGRAMDATA%\\Grindvakt\\credentials\\grindvakt.dek.dpapi`.
+- Service arguments pass `--data-dir=\"%PROGRAMDATA%\\Grindvakt\"`; for unattended service runs, `--data-dir` is effectively fixed to ProgramData and not configurable.
+- Install service: `grindvakt service install` (does not start it). Start later with `sc start Grindvakt`.
+- Enroll unattended credential: `grindvakt service enroll-credential` (requires elevated Administrator; seals the DEK with machine‑scope DPAPI).
+- The ProgramData folder is created with a protected DACL allowing only SYSTEM, Administrators, and LocalService. User‑owned folders are rejected. Upgrades/uninstall preserve ProgramData contents.
+- MSI packaging does not auto‑start services or background tasks; no activation occurs until you run explicit commands.
+
 Important security limits
 - The vault encrypts provider tokens using a random DEK (XChaCha20-Poly1305). The DEK is wrapped independently by an Argon2id key (from your password) and by an HKDF-SHA256 key (from your 24-word recovery). Recovery unlocks the existing vault to reset the password; losing both vault + recovery requires reissuing the token.
 - Files and directory permissions are enforced (0700 dir, 0600 files) with atomic write + fsync+rename.
