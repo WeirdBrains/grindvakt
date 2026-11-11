@@ -7,3 +7,7 @@ pub mod lock;
 pub mod provider;
 pub mod service;
 pub mod vault;
+#[cfg(target_os = "windows")]
+pub mod winservice;
+#[cfg(target_os = "windows")]
+pub mod winutil;

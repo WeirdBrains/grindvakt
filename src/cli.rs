@@ -46,6 +46,10 @@ pub enum Command {
         target_os = "macos",
         doc = "Manage launchd per-user agent and Keychain unattended credential"
     )]
+    #[cfg_attr(
+        target_os = "windows",
+        doc = "Manage Windows service (SCM) and unattended credential"
+    )]
     Service {
         #[command(subcommand)]
         cmd: ServiceCmd,
@@ -298,6 +302,10 @@ pub enum ServiceCmd {
         target_os = "macos",
         doc = "Install per-user launch agent under ~/Library/LaunchAgents (not loaded)"
     )]
+    #[cfg_attr(
+        target_os = "windows",
+        doc = "Register manual-start Windows service (does not start)"
+    )]
     Install(InstallService),
     #[cfg_attr(
         target_os = "linux",
@@ -307,7 +315,15 @@ pub enum ServiceCmd {
         target_os = "macos",
         doc = "Enroll Keychain unattended credential (stores DEK; prompts for password)"
     )]
+    #[cfg_attr(
+        target_os = "windows",
+        doc = "Enroll DPAPI machine-scope unattended credential (prompts for password)"
+    )]
     EnrollCredential(EnrollCredential),
+    /// Internal: run as Windows service (SCM). Not for manual use.
+    #[cfg(target_os = "windows")]
+    #[command(hide = true)]
+    Run(RunService),
 }
 
 impl ServiceCmd {
@@ -316,6 +332,8 @@ impl ServiceCmd {
             ServiceCmd::Print(cmd) => cmd.run().await,
             ServiceCmd::Install(cmd) => cmd.run().await,
             ServiceCmd::EnrollCredential(cmd) => cmd.run().await,
+            #[cfg(target_os = "windows")]
+            ServiceCmd::Run(cmd) => cmd.run().await,
         }
     }
 }
@@ -327,8 +345,11 @@ pub struct PrintService {
 }
 impl PrintService {
     pub async fn run(self) -> Result<()> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let paths = ConfigPaths::resolve(self.common.data_dir.as_deref())?;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let cfg = config::load_or_init_config(&paths)?;
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let exe = std::env::current_exe().context("resolve current executable")?;
         #[cfg(target_os = "linux")]
         {
@@ -339,6 +360,11 @@ impl PrintService {
         {
             let rendered = crate::service::render_launchd_with(&cfg, &exe, &paths.data_dir)?;
             println!("{}", rendered.plist);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            println!("Windows service uses SCM; no unit file to print.");
+            println!("Install via: grindvakt service install\nThen start with: sc start Grindvakt");
         }
         Ok(())
     }
@@ -352,10 +378,10 @@ pub struct InstallService {
 impl InstallService {
     pub async fn run(self) -> Result<()> {
         let paths = ConfigPaths::resolve(self.common.data_dir.as_deref())?;
-        let cfg = config::load_or_init_config(&paths)?;
+        let _cfg = config::load_or_init_config(&paths)?;
         let exe = std::env::current_exe().context("resolve current executable")?;
         InstallUnits::new()
-            .install(&cfg, &exe, &paths.data_dir)
+            .install(&_cfg, &exe, &paths.data_dir)
             .await
     }
 }
@@ -372,4 +398,17 @@ impl EnrollCredential {
         CredentialEnrollment::new(&paths).enroll(&cfg).await
     }
 }
-// No Windows service subcommands in this focused provider changeset
+
+#[cfg(target_os = "windows")]
+#[derive(ClapArgs, Debug)]
+pub struct RunService {
+    #[command(flatten)]
+    pub common: Common,
+}
+#[cfg(target_os = "windows")]
+impl RunService {
+    pub async fn run(self) -> Result<()> {
+        // Data dir may be overridden; pass-through already occurs via launch arguments when installed.
+        crate::winservice::run_service()
+    }
+}

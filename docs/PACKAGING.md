@@ -1,6 +1,6 @@
-# Packaging grindvakt (Arch, Debian, RPM)
+# Packaging grindvakt (Linux, macOS, Windows)
 
-This repository ships reproducible packaging sources and scripts. Builds are performed locally; no cloud builds occur here.
+This repository ships reproducible packaging sources and scripts. Linux packages are built by the tag-triggered Release workflow. macOS ARM64 `.pkg` and Windows x64 `.msi` installers are built on GitHub-hosted runners and attached to the same tag release. You can also build any of these packages locally as described below. Installers are unsigned.
 
 Binary layout
 - Binary install path: `/usr/bin/grindvakt`
@@ -44,6 +44,28 @@ RPM (.rpm) via cargo-generate-rpm (no rebuild)
 Arch (.pkg.tar.zst) via makepkg (no rebuild)
 - Use wrapper to stage a local binary and run `makepkg`:
   - `scripts/package/make-arch.sh --binary path/to/grindvakt --version X.Y.Z --outdir dist/`
+
+
+macOS ARM64 installer (.pkg)
+- Script: `scripts/package/macos/make-pkg.sh`
+- Requires a prior `cargo build --release` (or set `CARGO_TARGET_DIR` to a tree that already has `release/grindvakt`).
+- Output: `$CARGO_TARGET_DIR/grindvakt-X.Y.Z-macos-arm64.pkg` (unsigned). The installer does not load a launch agent or enroll credentials.
+- After install, enroll and install the per-user agent explicitly:
+  - `grindvakt service enroll-credential`
+  - `grindvakt service install`
+
+Windows x64 installer (.msi)
+- Script: `scripts/package/windows/make-msi.ps1`
+- Requires WiX v3.14.1 (`candle.exe`, `light.exe`) and a prior `cargo build --release` producing `grindvakt.exe`.
+- Official WiX 3.14.1 portable zip (hash must match before use):
+  - URL: `https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip`
+  - SHA-256: `6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31`
+- Build:
+  - `powershell -File scripts/package/windows/make-msi.ps1 -ExeSource path\to\grindvakt.exe -ProductVersion X.Y.Z -OutDir dist`
+  - Output: `dist/grindvakt-X.Y.Z-windows-x64.msi` (unsigned).
+- The MSI installs a manual-start LocalService, creates a protected `%PROGRAMDATA%\Grindvakt` folder, and never auto-starts or enrolls credentials. ProgramData is `Permanent`/`NeverOverwrite`. After install:
+  - `grindvakt service enroll-credential` (elevated Administrator; machine-scope DPAPI)
+  - `sc start Grindvakt`
 
 Install/uninstall (examples)
 - Debian:

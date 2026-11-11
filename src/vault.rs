@@ -491,6 +491,35 @@ pub async fn unlock_token_interactive(ctx: UnlockContext<'_>) -> Result<SecretSt
             return Ok(token);
         }
     }
+    #[cfg(target_os = "windows")]
+    if ctx.allow_unattended {
+        let pd = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+        let p = std::path::Path::new(&pd)
+            .join("Grindvakt")
+            .join("credentials")
+            .join("grindvakt.dek.dpapi");
+        if p.exists() {
+            match std::fs::read(&p) {
+                Ok(blob) => match crate::winutil::dpapi_unprotect(&blob) {
+                    Ok(dek) if dek.len() == 32 => {
+                        if let Ok(tok) = unlock_with_dek(ctx.paths, &dek) {
+                            return Ok(tok);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Unattended credential present but DPAPI unlock failed: {}",
+                            e
+                        );
+                    }
+                    _ => {}
+                },
+                Err(e) => {
+                    eprintln!("Failed to read unattended credential: {}", e);
+                }
+            }
+        }
+    }
     // Fallback to password prompt
     let vault = load_vault(&ctx.paths.vault_file)?;
     check_vault_supported(&vault)?;
@@ -546,6 +575,33 @@ pub async fn unlock_token_for_provider_interactive(
         }
     }
     // On macOS, also try Keychain generic password (service=grindvakt, account=grindvakt.dek)
+    #[cfg(target_os = "windows")]
+    if ctx.allow_unattended {
+        let pd = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+        let p = std::path::Path::new(&pd)
+            .join("Grindvakt")
+            .join("credentials")
+            .join("grindvakt.dek.dpapi");
+        if p.exists() {
+            match std::fs::read(&p) {
+                Ok(blob) => match crate::winutil::dpapi_unprotect(&blob) {
+                    Ok(dek) if dek.len() == 32 => {
+                        return unlock_provider_with_dek(ctx.paths, &dek, provider);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Unattended credential present but DPAPI unlock failed: {}",
+                            e
+                        );
+                    }
+                    _ => {}
+                },
+                Err(e) => {
+                    eprintln!("Failed to read unattended credential: {}", e);
+                }
+            }
+        }
+    }
     #[cfg(target_os = "macos")]
     if ctx.allow_unattended
         && let Some(data) = try_unattended_keychain_dek_scoped(ctx.paths, None)?
@@ -571,7 +627,7 @@ pub async fn unlock_token_for_provider_interactive(
     unlock_provider_with_dek(ctx.paths, &dek, provider)
 }
 
-fn unlock_provider_with_dek(
+pub(crate) fn unlock_provider_with_dek(
     paths: &ConfigPaths,
     dek: &[u8],
     provider: Provider,
@@ -759,7 +815,33 @@ impl<'a> CredentialEnrollment<'a> {
         );
         Ok(())
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(target_os = "windows")]
+    pub async fn enroll(&self, _cfg: &AppConfig) -> Result<()> {
+        let vault = load_vault(&self.paths.vault_file)?;
+        let pwd = prompt_secret("Vault password (to access DEK): ")?;
+        let salt = B64.decode(&vault.salt_password)?;
+        let kdf = vault.kdf.clone();
+        let key = derive_argon2_key(&pwd, &salt, &kdf)?;
+        let wrapped = B64.decode(&vault.dek_wrapped_by_password)?;
+        let dek = aead_open(&key, &wrapped, AAD_CONTEXT.as_bytes()).context("unlock failed")?;
+        if dek.len() != 32 {
+            bail!("unexpected DEK length");
+        }
+        let blob = crate::winutil::dpapi_protect_machine_scope(&dek)?;
+        let pd = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+        let cred_dir = std::path::Path::new(&pd)
+            .join("Grindvakt")
+            .join("credentials");
+        ensure_dir_0700(&cred_dir)?;
+        let dest = cred_dir.join("grindvakt.dek.dpapi");
+        atomic_write_0600(&dest, &blob).context("write dpapi blob")?;
+        println!(
+            "Enrolled unattended credential at {} (DPAPI machine scope)",
+            dest.display()
+        );
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     pub async fn enroll(&self, _cfg: &AppConfig) -> Result<()> {
         bail!("unattended credential enrollment unsupported on this OS");
     }

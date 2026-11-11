@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
-use directories::UserDirs;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
@@ -35,16 +34,41 @@ impl ConfigPaths {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn home_dir() -> Result<PathBuf> {
-    let user_dirs = UserDirs::new().context("could not resolve home directory")?;
+    let user_dirs = directories::UserDirs::new().context("could not resolve home directory")?;
     Ok(user_dirs.home_dir().to_path_buf())
 }
 
+#[cfg(target_os = "windows")]
+fn program_data_dir() -> Result<PathBuf> {
+    // Prefer %PROGRAMDATA% when available; fall back to C:\ProgramData.
+    if let Ok(pd) = std::env::var("PROGRAMDATA") {
+        Ok(PathBuf::from(pd))
+    } else {
+        Ok(PathBuf::from(r"C:\ProgramData"))
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn default_data_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".grindvakt"))
 }
+
+#[cfg(target_os = "windows")]
+fn default_data_dir() -> Result<PathBuf> {
+    Ok(program_data_dir()?.join("Grindvakt"))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn default_credstore_dir() -> Result<PathBuf> {
     Ok(home_dir()?.join(".config/systemd/user/credstore.encrypted"))
+}
+
+#[cfg(target_os = "windows")]
+fn default_credstore_dir() -> Result<PathBuf> {
+    // Shared credentials directory under ProgramData; readable by LocalService only.
+    Ok(program_data_dir()?.join("Grindvakt").join("credentials"))
 }
 
 pub fn ensure_data_dir(paths: &ConfigPaths) -> Result<()> {
