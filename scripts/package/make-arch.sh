@@ -49,13 +49,13 @@ pkgver=0.0.0
 pkgrel=1
 pkgdesc="User-mode DNS updater for DNSimple (secure local vault; systemd --user)"
 arch=('x86_64')
-license=('custom:LicenseRef-proprietary')
+license=('BSD-3-Clause')
 depends=()  # system glibc runtime as provided by Arch
 provides=('grindvakt')
 conflicts=('grindvakt')
-source=('local://grindvakt' 'local://README.md' 'local://IMPLEMENTATION_NOTES.md')
+source=('local://grindvakt' 'local://README.md' 'local://IMPLEMENTATION_NOTES.md' 'local://LICENSE')
 noextract=('grindvakt')
-sha256sums=('SKIP' 'SKIP' 'SKIP')
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 build() {
   :
@@ -65,11 +65,13 @@ package() {
   install -Dm755 "$srcdir/grindvakt" "$pkgdir/usr/bin/grindvakt"
   install -Dm644 "$srcdir/README.md" "$pkgdir/usr/share/doc/grindvakt/README.md"
   install -Dm644 "$srcdir/IMPLEMENTATION_NOTES.md" "$pkgdir/usr/share/doc/grindvakt/IMPLEMENTATION_NOTES.md"
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/grindvakt/LICENSE"
 }
 PKG
 
 cp -f "$root_dir/README.md" "$WK/README.md" || true
 cp -f "$root_dir/docs/IMPLEMENTATION_NOTES.md" "$WK/IMPLEMENTATION_NOTES.md" || true
+cp -f "$root_dir/LICENSE" "$WK/LICENSE"
 
 # makepkg consumes "local://" via copy from working dir
 pushd "$WK" >/dev/null
