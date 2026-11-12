@@ -58,16 +58,18 @@ macOS Apple Silicon installer (.pkg)
 
 Windows x64 installer (.msi)
 - Script: `scripts/package/windows/make-msi.ps1`
-- Requires WiX v3.14.1 (`candle.exe`, `light.exe`) and a prior `cargo build --release` producing `grindvakt.exe`.
+- Requires WiX v3.14.1 (`candle.exe`, `light.exe`, with the bundled WixUIExtension and WixUtilExtension) and a prior `cargo build --release` producing `grindvakt.exe`.
 - Official WiX 3.14.1 portable zip (hash must match before use):
   - URL: `https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip`
   - SHA-256: `6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31`
 - Build:
   - `powershell -File scripts/package/windows/make-msi.ps1 -ExeSource path\to\grindvakt.exe -ProductVersion X.Y.Z -OutDir dist`
   - Output: `dist/grindvakt-X.Y.Z-windows-x64.msi` (unsigned).
-- The MSI installs a manual-start LocalService, creates a protected `%PROGRAMDATA%\Grindvakt` folder, and never auto-starts or enrolls credentials. ProgramData is `Permanent`/`NeverOverwrite`. After install:
-  - `grindvakt service enroll-credential` (elevated Administrator; machine-scope DPAPI)
+- The MSI installs a manual-start LocalService (restart 60 s after a crash), creates a protected `%PROGRAMDATA%\Grindvakt` folder (Windows Installer's `CommonAppDataFolder`) that the service uses as its data dir, adds the install folder to the system PATH, and never auto-starts or enrolls credentials. ProgramData is `Permanent`/`NeverOverwrite`, so uninstalling keeps config, vault and credential. Upgrades stop the service. After install, in an elevated shell:
+  - `grindvakt init` (writes config and vault to `%PROGRAMDATA%\Grindvakt`)
+  - `grindvakt service enroll-credential` (machine-scope DPAPI)
   - `sc start Grindvakt`
+- `make-msi.ps1` checks the built MSI: license, data dir under `CommonAppDataFolder`, service arguments, PATH entry and restart-on-failure actions.
 
 Install/uninstall (examples)
 - Debian:

@@ -4,7 +4,8 @@ param(
   [Parameter(Mandatory=$true)][string]$OutDir
 )
 
-# Requires WiX v3.x (candle.exe, light.exe). Uses core PermissionEx only (no Util extension).
+# Requires WiX v3.x (candle.exe, light.exe). Uses core PermissionEx for the data dir ACL and
+# WixUtilExtension's ServiceConfig for the service's restart-on-failure actions.
 $ErrorActionPreference = "Stop"
 
 if (!(Test-Path -LiteralPath $ExeSource)) {
@@ -34,10 +35,10 @@ $rtf = "{\rtf1\ansi\deff0{\fonttbl{\f0\fmodern Consolas;}}\f0\fs18 " + ($escaped
 [IO.File]::WriteAllText($licenseRtf, $rtf, [Text.Encoding]::ASCII)
 
 try {
-  & $candle.Source -nologo -arch x64 -ext WixUIExtension "-dExeSource=$ExeSource" "-dProductVersion=$ProductVersion" "-dRepoRoot=$repoRoot" "-dLicenseRtf=$licenseRtf" -out $wixobj $wxs
+  & $candle.Source -nologo -arch x64 -ext WixUIExtension -ext WixUtilExtension "-dExeSource=$ExeSource" "-dProductVersion=$ProductVersion" "-dRepoRoot=$repoRoot" "-dLicenseRtf=$licenseRtf" -out $wixobj $wxs
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  & $light.Source -nologo -ext WixUIExtension -cultures:en-us -out $msi $wixobj
+  & $light.Source -nologo -ext WixUIExtension -ext WixUtilExtension -cultures:en-us -out $msi $wixobj
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
   Remove-Item -LiteralPath $licenseRtf -Force -ErrorAction SilentlyContinue
@@ -70,6 +71,17 @@ $files = Invoke-MsiQuery $msi "SELECT ``FileName`` FROM ``File`` WHERE ``File``=
 if ($files.Count -ne 1 -or $files[0] -notlike "*LICENSE.txt") { Write-Error "MSI check failed: LICENSE.txt not in File table ($files)"; exit 1 }
 $pane = Invoke-MsiQuery $msi "SELECT ``Text`` FROM ``Control`` WHERE ``Control``='LicenseText'"
 if ($pane.Count -lt 1 -or -not ($pane -join "`n").Contains("BSD 3-Clause License")) { Write-Error "MSI check failed: License pane does not show the license"; exit 1 }
-Write-Host "MSI checks passed: LICENSE.txt installed, License pane shows BSD 3-Clause"
+# The service's data dir must be %PROGRAMDATA%\Grindvakt (CommonAppDataFolder), never C:\Grindvakt.
+$dirs = Invoke-MsiQuery $msi "SELECT ``Directory`` FROM ``Directory`` WHERE ``Directory_Parent``='TARGETDIR'"
+if (-not ($dirs -contains "CommonAppDataFolder") -or ($dirs -contains "ProgramDataFolder")) { Write-Error "MSI check failed: data dir is not under CommonAppDataFolder ($dirs)"; exit 1 }
+$svcArgs = Invoke-MsiQuery $msi "SELECT ``Arguments`` FROM ``ServiceInstall`` WHERE ``ServiceInstall``='svcInstall'"
+if ($svcArgs.Count -ne 1 -or -not $svcArgs[0].Contains('--data-dir="[CommonAppDataFolder]Grindvakt"')) { Write-Error "MSI check failed: service arguments ($svcArgs)"; exit 1 }
+$envPath = Invoke-MsiQuery $msi "SELECT ``Value`` FROM ``Environment`` WHERE ``Environment``='envPath'"
+if ($envPath.Count -ne 1 -or -not $envPath[0].EndsWith("[INSTALLFOLDER]")) { Write-Error "MSI check failed: PATH entry ($envPath)"; exit 1 }
+foreach ($col in @("FirstFailureActionType", "SecondFailureActionType", "ThirdFailureActionType")) {
+  $action = Invoke-MsiQuery $msi "SELECT ``$col`` FROM ``ServiceConfig`` WHERE ``ServiceName``='Grindvakt'"
+  if ($action.Count -ne 1 -or $action[0] -ne "restart") { Write-Error "MSI check failed: service recovery $col ($action)"; exit 1 }
+}
+Write-Host "MSI checks passed: LICENSE.txt installed, License pane shows BSD 3-Clause, service data dir is %PROGRAMDATA%\Grindvakt, PATH entry present, restart on failure"
 
 Write-Host "MSI created at $msi"
