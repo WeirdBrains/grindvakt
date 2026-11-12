@@ -4,6 +4,18 @@ All notable changes to Grindvakt are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each release depends on the
 [grindvakt-core](https://crates.io/crates/grindvakt-core) version with the same number.
 
+## [1.1.2] - 2026-11-12
+
+### Changed
+
+- The macOS .pkg installs the license at `/usr/local/share/doc/grindvakt/LICENSE` and shows
+  it in a License pane. The Windows .msi installs `LICENSE.txt` next to `grindvakt.exe` and
+  shows it in the setup wizard. Both packaging scripts check the built installer for it.
+- Release and Pages workflows use least-privilege `permissions:` and actions pinned to
+  commit SHAs. Only the final publish job can write to the release; the macOS and Windows
+  builds hand their installers to it as artifacts.
+- Depends on grindvakt-core 1.1.2 (pinned `=1.1.2`), which has no library changes.
+
 ## [1.1.1] - 2026-11-11
 
 ### Changed
