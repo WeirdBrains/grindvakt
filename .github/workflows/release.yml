@@ -35,6 +35,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Check release.toml (shared release script)
+        shell: bash
+        run: python3 scripts/weirdnet_release.py validate
+
       - name: Setup Rust 1.99.1 with fmt/clippy
         shell: bash
         run: |

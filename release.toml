@@ -1,0 +1,87 @@
+# Grindvakt release config for the shared WeirdBrains release script
+# (scripts/weirdnet_release.py, vendored from weirdnet-project-helpers). See docs/RELEASES.md.
+helpers = "0.2.0"
+project = "grindvakt"
+next = [
+  "watch the Release workflow: gh run list -R WeirdBrains/grindvakt --workflow release.yml -L 1",
+  "check the installers: python3 scripts/weirdnet_release.py assets {version}",
+]
+
+[[files]]
+kind = "cargo-package"
+path = "Cargo.toml"
+primary = true
+
+[[files]]
+kind = "cargo-lock"
+path = "Cargo.lock"
+
+[[files]]
+kind = "pubspec"
+path = "pubspec.yaml"
+build = "keep"
+
+[[files]]
+kind = "regex"
+path = "lib/app.dart"
+pattern = "^const String appVersion = '{old}';"
+replace = "const String appVersion = '{version}';"
+
+# grindvakt-core moves in lockstep: grindvakt-core X.Y.Z must be on crates.io (released from its
+# own repo first). The bump pins `grindvakt-core = "=X.Y.Z"` and Cargo.lock must then hold that
+# version from crates.io with the index checksum.
+[[requires]]
+crate = "grindvakt-core"
+manifest = "Cargo.toml"
+lock = "Cargo.lock"
+
+[changelog]
+path = "CHANGELOG.md"
+default_section = "Added"
+
+[checks]
+commands = [
+  "cargo fmt --all --check",
+  "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
+  "cargo test --workspace --all-features --locked",
+  "cargo build --release --locked",
+]
+
+# Installers are built and attached by .github/workflows/release.yml on the pushed tag.
+[[platforms]]
+os = "linux"
+arch = ["x86_64"]
+arch_note = "aarch64 Linux builds are not made yet"
+formats = ["tar.gz", "deb", "rpm", "pkg.tar.zst"]
+channels = ["github"]
+assets = [
+  "grindvakt-x86_64-musl.tar.gz",
+  "grindvakt_{version}_amd64.deb",
+  "grindvakt-{version}-1.x86_64.rpm",
+  "grindvakt-{version}-1-x86_64.pkg.tar.zst",
+  "SHA256SUMS",
+]
+
+[[platforms]]
+os = "macos"
+arch = ["aarch64"]
+arch_note = "Apple Silicon only; Intel Macs are not supported"
+formats = ["pkg"]
+channels = ["github"]
+assets = ["grindvakt-{version}-macos-arm64.pkg", "grindvakt-{version}-macos-arm64.pkg.sha256"]
+
+[[platforms]]
+os = "windows"
+arch = ["x86_64"]
+arch_note = "ARM64 Windows builds are not made yet"
+formats = ["msi"]
+channels = ["github"]
+assets = ["grindvakt-{version}-windows-x64.msi", "grindvakt-{version}-windows-x64.msi.sha256"]
+
+[[platforms]]
+os = "android"
+opt_out = "a desktop and server DNS updater; no mobile app"
+
+[[platforms]]
+os = "ios"
+opt_out = "a desktop and server DNS updater; no mobile app"

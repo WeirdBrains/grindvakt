@@ -1,31 +1,63 @@
-# Release script usage
+# Releasing Grindvakt
 
-The canonical entrypoint is:
+Releases use the shared WeirdBrains release script, vendored from
+[weirdnet-project-helpers](https://github.com/WeirdBrains/weirdnet-project-helpers) as
+`scripts/weirdnet_release.py` and configured by `release.toml`. Don't edit the vendored copy:
+change it upstream, re-vendor it with `vendor.py` and update the `helpers` pin.
 
 ```bash
-scripts/release/release.py [--dry-run] [--resume] [--patch|--major] [--to X.Y.Z]
+python3 scripts/weirdnet_release.py validate          # check release.toml; change nothing
+python3 scripts/weirdnet_release.py --patch --dry-run # print every step and diff
+python3 scripts/weirdnet_release.py --patch --yes     # or --minor (the default), --major, --version X.Y.Z
+python3 scripts/weirdnet_release.py assets X.Y.Z      # after the Release workflow: all installers attached
 ```
+
+Build in a scratch checkout (set `CARGO_TARGET_DIR` outside the repo), on a clean `main` that is
+pushed and up to date. Write the release notes under `## [Unreleased]` in `CHANGELOG.md` before
+cutting; the script turns that heading into `## [X.Y.Z] - YYYY-MM-DD`.
 
 ## grindvakt-core lockstep
 
 The app is built on [grindvakt-core](https://crates.io/crates/grindvakt-core)
 ([repo](https://github.com/WeirdBrains/grindvakt-core)). Their versions move together: Grindvakt
 vX.Y.Z depends on `grindvakt-core = "=X.Y.Z"` from crates.io, never a path, git or `[patch]`
-override. Every app release therefore needs the matching crate published first, even when the
-crate did not change:
+override. Every app release needs the matching crate published first, even when the crate did
+not change:
 
-1. In grindvakt-core: add the `## [X.Y.Z]` CHANGELOG section and run `scripts/release.py X.Y.Z`.
-   It runs its gates, tags vX.Y.Z, pushes code and tag together, runs `cargo publish`, and waits
-   until crates.io serves X.Y.Z with the checksum of the local `.crate`.
-2. In this repo: stage the app changes and run `scripts/release/release.py` with the bump that
-   lands on X.Y.Z. Before touching any file it asks crates.io for grindvakt-core X.Y.Z and stops
-   if it is missing or yanked. It then pins the dependency to `"=X.Y.Z"`, runs
-   `cargo update -p grindvakt-core --precise X.Y.Z`, and refuses to continue unless Cargo.lock
-   has exactly that version from crates.io with the checksum crates.io reports. Only then do the
-   gates, the commit, the tag and the push run.
+1. In grindvakt-core: write its `## [Unreleased]` notes and run
+   `python3 scripts/weirdnet_release.py --version X.Y.Z --yes` (same script, its own
+   `release.toml`). It runs the crate's gates, commits `release: vX.Y.Z`, tags, pushes code and
+   tag in one atomic push, then runs `cargo publish`.
+2. In this repo: run the script with the bump that lands on X.Y.Z. The `[[requires]]` entry for
+   grindvakt-core makes it ask the crates.io index for X.Y.Z before touching any file and stop if
+   it is missing or yanked, or if Cargo.toml takes the crate from a path, git, another registry
+   or a `[patch]`/`[replace]` override. It pins `grindvakt-core = "=X.Y.Z"`, runs
+   `cargo update -p grindvakt-core --precise X.Y.Z`, and stops unless Cargo.lock then has exactly
+   that version from crates.io with the index checksum.
 
-`--resume` applies the same checks before it creates a missing tag or pushes, so an app tag is
-never pushed against an unpublished or diverging crate.
+## What a release does
+
+1. Preflight: on `main`, clean tree, not behind `origin/main`, tag absent locally and on origin,
+   version newer than every tag. Explicit versions must be plain SemVer (`X.Y.Z`).
+2. The lockstep check above.
+3. Bumps the version in `Cargo.toml`, the root entry of `Cargo.lock`, `pubspec.yaml` and
+   `appVersion` in `lib/app.dart` (the site's version link is built from it), pins
+   grindvakt-core, refreshes the lock and moves the changelog section.
+4. Gates, in order: `cargo fmt --all --check`,
+   `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,
+   `cargo test --workspace --all-features --locked`, `cargo build --release --locked`.
+   Any failure before the commit restores the starting commit.
+5. Commit `release: vX.Y.Z`, annotated tag `vX.Y.Z`, then
+   `git push --atomic origin HEAD:refs/heads/main refs/tags/vX.Y.Z`: code and tag land together
+   or not at all. Tags are never moved or overwritten. If the push fails, the commit and tag stay
+   local and the script prints the exact push to retry.
+6. The pushed tag starts `release.yml`, which builds the Linux (musl tar.gz, deb, rpm, Arch),
+   macOS (Apple Silicon .pkg) and Windows (.msi) installers, checks all nine assets and their
+   checksums, and attaches them to the GitHub release. `assets X.Y.Z` checks the release against
+   the `[[platforms]]` list in `release.toml`.
+
+The old `scripts/release/release.py` (and its `--resume`) was replaced by the shared script in
+1.2.0; a failed push is retried with the printed command instead.
 
 ## Workflows
 
@@ -36,36 +68,3 @@ write. The repository's default `GITHUB_TOKEN` is read-only, SHA pinning is requ
 allowed actions are GitHub-owned actions plus exactly `dart-lang/setup-dart@<sha>` and
 `softprops/action-gh-release@<sha>`. When you bump one of those two, update the allowed-actions
 list in the repository settings to the new SHA in the same change.
-
-Behavior
-
-- Default bump is MINOR when no flags are provided.
-- `--patch` bumps PATCH; `--major` bumps MAJOR. These flags are mutually exclusive.
-- `--to X.Y.Z` targets an exact SemVer (no pre-release/build metadata). Cannot be combined with bump flags.
-- `--dry-run` performs all read-only validations without mutating the repository or pushing.
-- `--resume` safely resumes a previous attempt:
-  - If the previous attempt created the release commit but tag creation or push failed, `--resume` will create the missing annotated tag only when it is provably safe (HEAD commit subject `release: vX.Y.Z`, HEAD^ equals origin/main, versions in Cargo.toml, Cargo.lock, pubspec.yaml, and the version link in lib/app.dart match, and no local/remote tag exists), then perform the atomic push.
-  - If the release is already completed on origin (origin/main equals HEAD, and the remote annotated tag’s peeled commit equals HEAD, and the remote annotated tag object id matches the local tag object id), the script exits 0 without bumping or pushing.
-
-Guards and gates
-
-- Requires a clean working tree and branch `main` tracking `origin/main`.
-- Monotonic version check against the highest local and remote stable tags.
-- grindvakt-core X.Y.Z must be published on crates.io (not yanked); otherwise the script stops before any edit, including in `--dry-run`.
-- Version bump is written to Cargo.toml (the package version and the `grindvakt-core = "=X.Y.Z"` pin), the root package entry in Cargo.lock, the `version:` field in pubspec.yaml, and `appVersion` in lib/app.dart; Cargo.lock is refreshed with `cargo update -p grindvakt-core --precise X.Y.Z` and must then match the crates.io version and checksum. The version link (`classes: 'btn version'`) builds its href and label from `$appVersion`, so it always points at `releases/tag/v` plus the current version. Gates then run in order:
-  - `cargo fmt --all --check`
-  - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
-  - `cargo test --workspace --all-features --locked`
-  - `cargo build --release --locked`
-- On any pre-commit failure, Cargo.toml, Cargo.lock, pubspec.yaml, and lib/app.dart are restored exactly in the working tree and index to their original state.
-- The release commit has message `release: vX.Y.Z`. On commit failure (e.g., hooks), files and index are restored to their original state.
-- Tag creation failures do not roll back the commit; re-run with `--resume` to safely create the missing annotated tag.
-- Push uses `git push --atomic origin HEAD:refs/heads/main refs/tags/vX.Y.Z`, then verifies both branch and tag SHAs on origin match local.
-
-Notes
-
-- The script never moves or overwrites existing tags (local or remote).
-- Dry-run is strictly read-only and does not fetch; tag/branch checks use `git ls-remote` only, and the grindvakt-core check is a read-only crates.io API request.
-- Tests: `python3 -m pytest release-tests` (offline; git, cargo and crates.io are faked).
- 
-
