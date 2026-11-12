@@ -1,6 +1,6 @@
 [package]
 name = "grindvakt"
-version = "1.1.4"
+version = "1.2.0"
 edition = "2024"
 rust-version = "1.99"
 description = "Grindvakt — a user-mode DNS updater for DNSimple with secure local vault and systemd user timer"
