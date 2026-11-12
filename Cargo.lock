@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "grindvakt"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -996,9 +996,9 @@ dependencies = [
 
 [[package]]
 name = "grindvakt-core"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cac3ed64158e0eaeed577ae88cbbe821ffee6739ecc3c3d95006675c15a5a3e"
+checksum = "9c3a628f757fd57ff7bec15e369f1188e002479959c6ebc7f950b9ec94f91de4"
 dependencies = [
  "base64 0.21.7",
  "chrono",

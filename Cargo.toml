@@ -1,6 +1,6 @@
 [package]
 name = "grindvakt"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2024"
 rust-version = "1.99"
 description = "Grindvakt — a user-mode DNS updater for DNSimple with secure local vault and systemd user timer"
@@ -44,7 +44,7 @@ assets = [
 [dependencies]
 # The DNS engine, vault format and private-file handling. Always the exact version that matches
 # this release (lockstep; see docs/RELEASES.md) and always from crates.io.
-grindvakt-core = { version = "=1.1.1", features = ["vault", "standalone"] }
+grindvakt-core = { version = "=1.1.2", features = ["vault", "standalone"] }
 anyhow = "1.0"
 tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "time", "fs", "process", "signal", "sync", "io-util"] }
 clap = { version = "4.5", features = ["derive", "env"] }
