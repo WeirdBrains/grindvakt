@@ -303,22 +303,26 @@ jobs:
         shell: bash
         run: cargo build --release --locked
 
-      - name: Install pinned WiX 3.14.1
+      # WiX 7 is used under the Open Source Maintenance Fee EULA v1.1, which Michael accepted on
+      # 2026-11-12 (docs/RELEASES.md); every wix command passes -acceptEula wix7.
+      - name: Install pinned WiX 7.0.1
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $url = "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
-          $expected = "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31"
-          $zip = Join-Path $env:RUNNER_TEMP "wix314-binaries.zip"
-          $dest = Join-Path $env:RUNNER_TEMP "wix314"
-          Invoke-WebRequest -Uri $url -OutFile $zip
-          $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+          $url = "https://github.com/wixtoolset/wix/releases/download/v7.0.1/wix-cli-x64.msi"
+          $expected = "93673c89ab33b1fd3f07ad5e609b7cae694bd716b2914259b61a41c02303b64c"
+          $msi = Join-Path $env:RUNNER_TEMP "wix-cli-x64.msi"
+          Invoke-WebRequest -Uri $url -OutFile $msi
+          $actual = (Get-FileHash -Algorithm SHA256 -Path $msi).Hash.ToLowerInvariant()
           if ($actual -ne $expected) {
-            throw "WiX zip hash mismatch: $actual != $expected"
+            throw "WiX MSI hash mismatch: $actual != $expected"
           }
-          New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
-          Add-Content -Path $env:GITHUB_PATH -Value $dest
+          $p = Start-Process msiexec.exe -ArgumentList @("/i", "`"$msi`"", "/qn", "/norestart") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "WiX install failed: $($p.ExitCode)" }
+          $bin = "C:\Program Files\WiX Toolset v7.0\bin"
+          & (Join-Path $bin "wix.exe") extension add -acceptEula wix7 -g WixToolset.UI.wixext/7.0.1 WixToolset.Util.wixext/7.0.1
+          if ($LASTEXITCODE -ne 0) { throw "wix extension add failed: $LASTEXITCODE" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
 
       - name: Build unsigned MSI
         shell: pwsh
@@ -327,7 +331,7 @@ jobs:
           $exe = Join-Path (Get-Location) "target\release\grindvakt.exe"
           if (!(Test-Path -LiteralPath $exe)) { throw "missing $exe" }
           New-Item -ItemType Directory -Force -Path "dist" | Out-Null
-          powershell -File "scripts\package\windows\make-msi.ps1" -ExeSource $exe -ProductVersion "${{ needs.linux.outputs.cargo }}" -OutDir (Join-Path (Get-Location) "dist")
+          powershell -File "scripts\package\windows\make-msi.ps1" -ExeSource $exe -ProductVersion "${{ needs.linux.outputs.cargo }}" -OutDir (Join-Path (Get-Location) "dist") -WixVersion "7.0.1"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $msi = "dist\grindvakt-${{ needs.linux.outputs.cargo }}-windows-x64.msi"
           if (!(Test-Path -LiteralPath $msi)) { throw "missing $msi" }

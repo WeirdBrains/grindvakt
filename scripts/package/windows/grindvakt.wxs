@@ -1,78 +1,127 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
-  <Product Id="*" Name="Grindvakt" Language="1033" Version="$(var.ProductVersion)" Manufacturer="WeirdBrains" UpgradeCode="{6BB7E9C7-6F10-4C1D-8C7B-39E0D6C3B7C5}">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Grindvakt is already installed." />
-    <MediaTemplate EmbedCab="yes" CompressionLevel="high"/>
+<!-- Grindvakt MSI, WiX Toolset 7 (built by make-msi.ps1). The UpgradeCode is the one every
+     Grindvakt MSI has used, so this package upgrades 1.1.x installs in place. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Grindvakt"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="WeirdBrains"
+           UpgradeCode="{6BB7E9C7-6F10-4C1D-8C7B-39E0D6C3B7C5}"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+    <!-- The older version is removed inside this install's transaction (after InstallInitialize),
+         so GvRememberRunning below can see whether its service was running first. -->
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of Grindvakt is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <!-- License pane: WixUI_Minimal shows the BSD-3-Clause license before installing. -->
-    <UIRef Id="WixUI_Minimal" />
+    <ui:WixUI Id="WixUI_Minimal" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
 
     <Feature Id="MainFeature" Title="Grindvakt" Level="1">
-      <ComponentRef Id="cmpExe"/>
-      <ComponentRef Id="cmpDocs"/>
-      <ComponentRef Id="cmpLicense"/>
-      <ComponentRef Id="cmpProgramData"/>
+      <ComponentRef Id="cmpExe" />
+      <ComponentRef Id="cmpDocs" />
+      <ComponentRef Id="cmpLicense" />
+      <ComponentRef Id="cmpProgramData" />
     </Feature>
 
-    <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFiles64Folder">
-        <Directory Id="INSTALLFOLDER" Name="Grindvakt">
-          <Component Id="cmpExe" Guid="{5B49C4B1-508C-447F-B9BE-3E2CFB86B0B3}">
-            <File Id="filExe" Source="$(var.ExeSource)" KeyPath="yes" Name="grindvakt.exe" />
-            <!-- Manual-start service running as LocalService; do not auto-start. -->
-            <ServiceInstall Id="svcInstall"
-                            Name="Grindvakt"
-                            DisplayName="Grindvakt DNS Updater"
-                            Description="Updates DNS A record on a schedule"
-                            Start="demand"
-                            Type="ownProcess"
-                            ErrorControl="normal"
-                            Vital="yes"
-                            Account="NT AUTHORITY\LocalService"
-                            Arguments="service run --data-dir=&quot;[CommonAppDataFolder]Grindvakt&quot;">
-              <!-- Restart after a crash (60 s, every time; the count resets after a day). -->
-              <util:ServiceConfig FirstFailureActionType="restart"
-                                  SecondFailureActionType="restart"
-                                  ThirdFailureActionType="restart"
-                                  RestartServiceDelayInSeconds="60"
-                                  ResetPeriodInDays="1" />
-            </ServiceInstall>
-            <!-- Put grindvakt.exe on the system PATH so `grindvakt init` works from any shell. -->
-            <Environment Id="envPath"
-                         Name="PATH"
-                         Action="set"
-                         Part="last"
-                         System="yes"
-                         Permanent="no"
-                         Value="[INSTALLFOLDER]" />
-            <ServiceControl Id="svcControl"
-                            Name="Grindvakt"
-                            Stop="both"
-                            Remove="uninstall"
-                            Wait="yes" />
-          </Component>
-          <Component Id="cmpDocs" Guid="{A9E2C2F3-6F73-4F79-BB10-7E9B0A42D9B4}">
-            <File Id="filReadme" Source="$(var.RepoRoot)\README.md" Name="README.md" KeyPath="yes" />
-            <File Id="filImplNotes" Source="$(var.RepoRoot)\docs\IMPLEMENTATION_NOTES.md" Name="IMPLEMENTATION_NOTES.md" />
-          </Component>
-          <Component Id="cmpLicense" Guid="{03360D07-EE84-4B49-B975-5A92F03FA701}">
-            <File Id="filLicense" Source="$(var.RepoRoot)\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
-          </Component>
-        </Directory>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Grindvakt">
+        <Component Id="cmpExe" Guid="{5B49C4B1-508C-447F-B9BE-3E2CFB86B0B3}">
+          <File Id="filExe" Source="$(var.ExeSource)" KeyPath="yes" Name="grindvakt.exe" />
+          <!-- Manual-start service running as its own virtual account NT SERVICE\Grindvakt
+               (SID S-1-5-80-1499467798-2283939423-2764506236-959416072-1900373211); never
+               auto-started by a fresh install. -->
+          <ServiceInstall Id="svcInstall"
+                          Name="Grindvakt"
+                          DisplayName="Grindvakt DNS Updater"
+                          Description="Updates DNS A record on a schedule"
+                          Start="demand"
+                          Type="ownProcess"
+                          ErrorControl="normal"
+                          Vital="yes"
+                          Account="NT SERVICE\Grindvakt"
+                          Arguments="service run --data-dir=&quot;[CommonAppDataFolder]Grindvakt&quot;">
+            <!-- Restart after a crash (60 s, every time; the count resets after a day). -->
+            <util:ServiceConfig FirstFailureActionType="restart"
+                                SecondFailureActionType="restart"
+                                ThirdFailureActionType="restart"
+                                RestartServiceDelayInSeconds="60"
+                                ResetPeriodInDays="1" />
+          </ServiceInstall>
+          <!-- Put grindvakt.exe on the system PATH so `grindvakt init` works from any shell. -->
+          <Environment Id="envPath"
+                       Name="PATH"
+                       Action="set"
+                       Part="last"
+                       System="yes"
+                       Permanent="no"
+                       Value="[INSTALLFOLDER]" />
+          <ServiceControl Id="svcControl"
+                          Name="Grindvakt"
+                          Stop="both"
+                          Remove="uninstall"
+                          Wait="yes" />
+        </Component>
+        <Component Id="cmpDocs" Guid="{A9E2C2F3-6F73-4F79-BB10-7E9B0A42D9B4}">
+          <File Id="filReadme" Source="$(var.RepoRoot)\README.md" Name="README.md" KeyPath="yes" />
+          <File Id="filImplNotes" Source="$(var.RepoRoot)\docs\IMPLEMENTATION_NOTES.md" Name="IMPLEMENTATION_NOTES.md" />
+        </Component>
+        <Component Id="cmpLicense" Guid="{03360D07-EE84-4B49-B975-5A92F03FA701}">
+          <File Id="filLicense" Source="$(var.RepoRoot)\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+        </Component>
       </Directory>
-      <!-- CommonAppDataFolder is Windows Installer's %PROGRAMDATA% (C:\ProgramData\). -->
-      <Directory Id="CommonAppDataFolder">
-        <Directory Id="ProgramDataGrindvakt" Name="Grindvakt">
-          <Component Id="cmpProgramData" Guid="{0F610D7E-43D9-4D35-9C0E-7B4E0B66F69A}" Permanent="yes" NeverOverwrite="yes" KeyPath="yes">
-            <!-- Secure ProgramData\Grindvakt: Owner/Group SYSTEM; protected DACL; LocalService allowed -->
-            <CreateFolder>
-              <PermissionEx Sddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;LS)"/>
-            </CreateFolder>
-          </Component>
-        </Directory>
+    </StandardDirectory>
+
+    <!-- CommonAppDataFolder is Windows Installer's %PROGRAMDATA% (C:\ProgramData\). -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="ProgramDataGrindvakt" Name="Grindvakt">
+        <Component Id="cmpProgramData" Guid="{0F610D7E-43D9-4D35-9C0E-7B4E0B66F69A}" Permanent="yes" NeverOverwrite="yes" KeyPath="yes">
+          <!-- ProgramData\Grindvakt: owner SYSTEM; protected DACL for SYSTEM, Administrators and
+               NT SERVICE\Grindvakt only. -->
+          <CreateFolder>
+            <PermissionEx Sddl="O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;S-1-5-80-1499467798-2283939423-2764506236-959416072-1900373211)" />
+          </CreateFolder>
+        </Component>
       </Directory>
-    </Directory>
-  </Product>
+    </StandardDirectory>
+
+    <StandardDirectory Id="System64Folder" />
+
+    <!-- Upgrades: remember whether the old service was running (before the old version is
+         removed, which stops it), restrict the files a 1.1.x install wrote to the new
+         account, and start the service again at the end if it was running.
+         GvRememberRunning is immediate and runs before InstallInitialize: Windows Installer
+         refuses (error 2613) any deferred action ahead of RemoveExistingProducts when that is
+         scheduled after InstallInitialize. Querying a service needs no rights, and the marker
+         goes in the installing user's temp folder. The other two are deferred, as SYSTEM;
+         [TempFolder] in GvRestoreRunning is resolved when the script is written, so it names
+         the same folder. -->
+    <CustomAction Id="GvRememberRunning"
+                  Directory="System64Folder"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /d /c &quot;del /f /q &quot;[TempFolder]grindvakt-restart-after-upgrade&quot; 2&gt;nul &amp; &quot;[System64Folder]sc.exe&quot; query Grindvakt | &quot;[System64Folder]find.exe&quot; &quot;RUNNING&quot; &gt;nul &amp;&amp; echo running&gt;&quot;[TempFolder]grindvakt-restart-after-upgrade&quot;&quot;"
+                  Execute="immediate"
+                  Return="ignore" />
+    <CustomAction Id="GvRepairAcl"
+                  FileRef="filExe"
+                  ExeCommand="service repair-acl --data-dir=&quot;[CommonAppDataFolder]Grindvakt&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+    <CustomAction Id="GvRestoreRunning"
+                  Directory="System64Folder"
+                  ExeCommand="&quot;[System64Folder]cmd.exe&quot; /d /c &quot;if exist &quot;[TempFolder]grindvakt-restart-after-upgrade&quot; (del /f /q &quot;[TempFolder]grindvakt-restart-after-upgrade&quot; &amp; &quot;[System64Folder]sc.exe&quot; start Grindvakt)&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="GvRememberRunning" Before="InstallInitialize" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="GvRepairAcl" After="InstallFiles" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="GvRestoreRunning" After="StartServices" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+  </Package>
 </Wix>
