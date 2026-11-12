@@ -276,6 +276,11 @@ pub enum ServiceCmd {
     #[cfg(target_os = "windows")]
     #[command(hide = true)]
     Run(RunService),
+    /// Internal (the MSI runs it): restrict the data dir to SYSTEM, Administrators and the
+    /// service account. Needs an elevated shell.
+    #[cfg(target_os = "windows")]
+    #[command(hide = true)]
+    RepairAcl(RepairAcl),
 }
 
 impl ServiceCmd {
@@ -286,6 +291,8 @@ impl ServiceCmd {
             ServiceCmd::EnrollCredential(cmd) => cmd.run().await,
             #[cfg(target_os = "windows")]
             ServiceCmd::Run(cmd) => cmd.run().await,
+            #[cfg(target_os = "windows")]
+            ServiceCmd::RepairAcl(cmd) => cmd.run(),
         }
     }
 }
@@ -348,6 +355,20 @@ impl EnrollCredential {
         let paths = ConfigPaths::resolve(self.common.data_dir.as_deref())?;
         let cfg = config::load_or_init_config(&paths)?;
         CredentialEnrollment::new(&paths).enroll(&cfg).await
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(ClapArgs, Debug)]
+pub struct RepairAcl {
+    #[command(flatten)]
+    pub common: Common,
+}
+#[cfg(target_os = "windows")]
+impl RepairAcl {
+    pub fn run(self) -> Result<()> {
+        let paths = ConfigPaths::resolve(self.common.data_dir.as_deref())?;
+        crate::winservice::repair_data_dir(&paths)
     }
 }
 

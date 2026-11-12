@@ -44,7 +44,7 @@ assets = [
 [dependencies]
 # The DNS engine, vault format and private-file handling. Always the exact version that matches
 # this release (lockstep; see docs/RELEASES.md) and always from crates.io.
-grindvakt-core = { version = "=1.1.4", features = ["vault", "standalone"] }
+grindvakt-core = { version = "=1.2.0", features = ["vault", "standalone"] }
 anyhow = "1.0"
 tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "time", "fs", "process", "signal", "sync", "io-util"] }
 clap = { version = "4.5", features = ["derive", "env"] }
