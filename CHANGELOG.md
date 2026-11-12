@@ -4,6 +4,29 @@ All notable changes to Grindvakt are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each release depends on the
 [grindvakt-core](https://crates.io/crates/grindvakt-core) version with the same number.
 
+## [1.1.4] - 2026-11-12
+
+### Fixed
+
+- The Windows .msi pointed the service at `C:\Grindvakt` instead of `%PROGRAMDATA%\Grindvakt`,
+  so the service never found the config that `grindvakt init` writes. The installer now creates
+  and uses `%PROGRAMDATA%\Grindvakt`. If you moved your config and vault to `C:\Grindvakt` to
+  work around this, move `config.toml` and `vault.json` back to `%PROGRAMDATA%\Grindvakt`.
+- Windows service runs on an interval are now `interval_secs` apart, not 60 s more.
+- The Windows service log has no terminal color codes and records start, stop and the data dir.
+- When the Windows service cannot write `service.log`, it says why in the Application event log
+  (source `Grindvakt`) instead of failing silently.
+
+### Changed
+
+- The Windows service restarts 60 s after a crash (the MSI and `grindvakt service install`
+  both set this) and has a description.
+- The .msi adds the install folder to the system PATH, so `grindvakt` works in a new shell.
+- Release and Pages workflows use actions/checkout 7.0.1 (without persisted credentials),
+  softprops/action-gh-release 3.0.4, dart-lang/setup-dart 1.8.2 and actions/deploy-pages
+  5.0.1, all pinned to commit SHAs.
+- Depends on grindvakt-core 1.1.4 (pinned `=1.1.4`), which has no library changes.
+
 ## [1.1.3] - 2026-11-12
 
 ### Changed
