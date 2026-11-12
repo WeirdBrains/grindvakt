@@ -8,7 +8,7 @@ Binary layout
 - No system-level services or config files are installed. grindvakt manages systemd --user units explicitly via its CLI.
 
 Licensing/metadata
-- Package license: `LicenseRef-proprietary` (Cargo.toml `license = "UNLICENSED"`). No fabricated homepage or maintainer email.
+- Package license: `BSD-3-Clause` (Cargo.toml `license`). The `.deb` copyright file is generated from `LICENSE`; the `.rpm` and Arch packages install it to `/usr/share/licenses/grindvakt/LICENSE`. No fabricated homepage or maintainer email.
 
 Prereqs on alien-blue
 - Arch tools: `makepkg`, `fakeroot`, `bsdtar`, `zstd`

@@ -4,8 +4,8 @@ version = "1.1.0"
 edition = "2024"
 rust-version = "1.99"
 description = "Grindvakt — a user-mode DNS updater for DNSimple with secure local vault and systemd user timer"
-license = "UNLICENSED"
-repository = ""
+license = "BSD-3-Clause"
+repository = "https://github.com/WeirdBrains/grindvakt"
 authors = ["WeirdBrains"]
 
 [package.metadata.grindvakt]
@@ -16,7 +16,8 @@ default_ttl = 300
 [package.metadata.deb]
 name = "grindvakt"
 maintainer = "unspecified"
-copyright = "Copyright: Proprietary"
+copyright = "2026, WeirdBrains / Michael Christenson II"
+license-file = ["LICENSE", "0"]
 section = "utils"
 priority = "optional"
 extended-description = """
@@ -32,11 +33,12 @@ assets = [
 ]
 
 [package.metadata.generate-rpm]
-license = "LicenseRef-proprietary"
+license = "BSD-3-Clause"
 assets = [
   { source = "target/release/grindvakt", dest = "/usr/bin/grindvakt", mode = "755" },
   { source = "README.md", dest = "/usr/share/doc/grindvakt/README.md", mode = "644" },
   { source = "docs/IMPLEMENTATION_NOTES.md", dest = "/usr/share/doc/grindvakt/IMPLEMENTATION_NOTES.md", mode = "644" },
+  { source = "LICENSE", dest = "/usr/share/licenses/grindvakt/LICENSE", mode = "644" },
 ]
 
 [dependencies]

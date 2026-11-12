@@ -4,6 +4,15 @@ All notable changes to Grindvakt are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each release depends on the
 [grindvakt-core](https://crates.io/crates/grindvakt-core) version with the same number.
 
+## [1.1.1] - 2026-11-11
+
+### Changed
+
+- Grindvakt is now open source under the BSD-3-Clause license (`LICENSE`), the same as
+  grindvakt-core, and the repository is public. Package metadata declares BSD-3-Clause, and
+  the Linux packages ship the license text.
+- Depends on grindvakt-core 1.1.1 (pinned `=1.1.1`), which has no library changes.
+
 ## [1.1.0] - 2026-11-11
 
 ### Changed

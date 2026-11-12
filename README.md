@@ -68,7 +68,7 @@ Testing and validation (not run in cloud)
 - Use `--data-dir` to point tests to tempdirs; never touches real `~/.grindvakt`.
 
 License
-- Private draft. Not for redistribution.
+- BSD-3-Clause; see `LICENSE`. The grindvakt-core library is BSD-3-Clause too.
 
 
 
