@@ -44,10 +44,12 @@ Install user service without enabling
 
 Windows service
 - Manual-start Windows service installed to run under `NT AUTHORITY\\LocalService`.
-- Program data directory: `%PROGRAMDATA%\\Grindvakt` (service log `service.log` is written here).
+- Program data directory: `%PROGRAMDATA%\\Grindvakt` (service log `service.log` is written here; if the service cannot write it, the reason goes to the Application event log, source `Grindvakt`).
 - Unattended credential (machine-scoped DPAPI) path: `%PROGRAMDATA%\\Grindvakt\\credentials\\grindvakt.dek.dpapi`.
 - Service arguments pass `--data-dir=\"%PROGRAMDATA%\\Grindvakt\"`; for unattended service runs, `--data-dir` is effectively fixed to ProgramData and not configurable.
 - Install service: `grindvakt service install` (does not start it). Start later with `sc start Grindvakt`.
+- Setup after the MSI (elevated shell): `grindvakt init`, then `grindvakt service enroll-credential`, then `sc start Grindvakt`. The MSI puts `grindvakt` on the system PATH.
+- The service restarts 60 s after a crash. Installing an upgrade stops it; start it again with `sc start Grindvakt`.
 - Enroll unattended credential: `grindvakt service enroll-credential` (requires elevated Administrator; seals the DEK with machine‑scope DPAPI).
 - The ProgramData folder is created with a protected DACL allowing only SYSTEM, Administrators, and LocalService. User‑owned folders are rejected. Upgrades/uninstall preserve ProgramData contents.
 - MSI packaging does not auto‑start services or background tasks; no activation occurs until you run explicit commands.

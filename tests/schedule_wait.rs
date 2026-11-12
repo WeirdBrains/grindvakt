@@ -1,6 +1,6 @@
 use chrono::Timelike;
 use grindvakt::config::{AppConfig, Provider, Schedule};
-use grindvakt::schedule::compute_wait;
+use grindvakt::schedule::{compute_wait, post_run_guard};
 use std::time::{Duration, SystemTime};
 
 #[test]
@@ -56,4 +56,20 @@ fn unsupported_calendar_rejected() {
     cfg.schedule.interval_secs = None;
     let d = compute_wait(SystemTime::now(), &cfg);
     assert!(d.is_err());
+}
+
+#[test]
+fn interval_runs_have_no_extra_guard() {
+    let mut cfg = AppConfig::default();
+    cfg.schedule.calendar = None;
+    cfg.schedule.interval_secs = Some(300);
+    assert_eq!(post_run_guard(&cfg), Duration::ZERO);
+}
+
+#[test]
+fn calendar_runs_wait_out_the_boundary_minute() {
+    let mut cfg = AppConfig::default();
+    cfg.schedule.calendar = Some("*:0/10".into());
+    cfg.schedule.interval_secs = None;
+    assert_eq!(post_run_guard(&cfg), Duration::from_secs(60));
 }
