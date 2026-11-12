@@ -5,7 +5,7 @@ Secure, user-mode DNS updater for DNSimple and DigitalOcean. Rust CLI with:
 - Idempotent A record create/update/noop on DNSimple (official crate)
 - Local encrypted vault under `~/.grindvakt` with password unlock and 24‑word recovery
 - systemd --user oneshot service + configurable timer (no root/system units)
-- macOS launchd per-user agent (no autoload; install via CLI)
+- macOS launchd per-user agent (no autoload; install via CLI). Apple Silicon Macs only; Intel Macs are not supported
 - Windows service (manual start) with a DPAPI unattended credential
 
 The DNS engine, vault format and private-file handling live in the
@@ -81,7 +81,8 @@ License
 
 Security: tokens are encrypted in the vault; migrations preserve existing DNSimple tokens. Switching providers retains both tokens. No secrets are printed or stored on argv/env.
 
-macOS service
+macOS service (Apple Silicon only)
+- The `.pkg` installs only on Apple Silicon (M1 or later) Macs and refuses Intel Macs.
 - Print agent: `grindvakt service print` (shows the user LaunchAgent .plist)
 - Install agent: `grindvakt service install` (writes to `~/Library/LaunchAgents/com.weirdbrains.grindvakt.plist`, does not load/enable)
 - Load later: `launchctl load ~/Library/LaunchAgents/com.weirdbrains.grindvakt.plist`

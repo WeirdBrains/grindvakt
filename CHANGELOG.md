@@ -4,6 +4,17 @@ All notable changes to Grindvakt are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each release depends on the
 [grindvakt-core](https://crates.io/crates/grindvakt-core) version with the same number.
 
+## [1.1.3] - 2026-11-12
+
+### Changed
+
+- The macOS .pkg is Apple Silicon only. It sets `hostArchitectures="arm64"` and has an
+  installation check that stops on Intel Macs with "Apple silicon required". Intel Macs are
+  not supported. The packaging script refuses a binary that is not thin arm64 and checks the
+  built pkg for these settings.
+- README, packaging docs, the site and the release notes say Apple Silicon only.
+- Depends on grindvakt-core 1.1.3 (pinned `=1.1.3`), which has no library changes.
+
 ## [1.1.2] - 2026-11-12
 
 ### Changed

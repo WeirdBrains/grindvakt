@@ -111,6 +111,7 @@ class Grindvakt extends StatelessComponent {
           p([
             .text(
               'Download an installer or the portable tarball from the v$appVersion GitHub release. '
+              'The macOS package is for Apple Silicon Macs only; Intel Macs are not supported. '
               'The macOS package and Windows MSI are unsigned. They do not start a service, '
               'load a launch agent, or enroll credentials.',
             ),
@@ -148,7 +149,7 @@ class Grindvakt extends StatelessComponent {
               a(
                 href:
                     'https://github.com/WeirdBrains/grindvakt/releases/download/v$appVersion/grindvakt-$appVersion-macos-arm64.pkg',
-                [.text('macOS ARM64 (.pkg) — unsigned')],
+                [.text('macOS Apple Silicon (.pkg) — unsigned, no Intel Macs')],
               ),
             ]),
             li([
