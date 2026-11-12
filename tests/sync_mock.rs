@@ -29,9 +29,14 @@ fn token() -> SecretString {
 }
 
 async fn do_list(server: &MockServer, records: serde_json::Value) {
+    do_list_kind(server, "CNAME", json!([])).await;
+    do_list_kind(server, "A", records).await;
+}
+
+async fn do_list_kind(server: &MockServer, kind: &str, records: serde_json::Value) {
     Mock::given(method("GET"))
         .and(path("/v2/domains/example.com/records"))
-        .and(query_param("type", "A"))
+        .and(query_param("type", kind))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(json!({"domain_records": records, "links": {}})),
@@ -71,6 +76,31 @@ async fn digitalocean_dry_run_then_create() {
     assert_eq!(
         done.to_string(),
         "Created A www.example.com = 93.184.216.34 (ttl=300)"
+    );
+}
+
+#[tokio::test]
+async fn digitalocean_refuses_a_record_where_a_cname_exists() {
+    let server = MockServer::start().await;
+    do_list_kind(
+        &server,
+        "CNAME",
+        json!([{"id": 3, "type": "CNAME", "name": "www", "data": "home.example.net.", "ttl": 300}]),
+    )
+    .await;
+    do_list_kind(&server, "A", json!([])).await;
+    let c = cfg(Provider::Digitalocean, "www", &server);
+    let e = sync_record(
+        &c,
+        &token(),
+        "93.184.216.34".parse().unwrap(),
+        SyncMode::Apply,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        e.to_string().contains("is a CNAME to home.example.net"),
+        "{e:#}"
     );
 }
 
