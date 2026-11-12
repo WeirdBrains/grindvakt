@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi" xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
   <Product Id="*" Name="Grindvakt" Language="1033" Version="$(var.ProductVersion)" Manufacturer="WeirdBrains" UpgradeCode="{6BB7E9C7-6F10-4C1D-8C7B-39E0D6C3B7C5}">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of Grindvakt is already installed." />
@@ -31,7 +31,22 @@
                             ErrorControl="normal"
                             Vital="yes"
                             Account="NT AUTHORITY\LocalService"
-                            Arguments="service run --data-dir=&quot;[ProgramDataFolder]Grindvakt&quot;" />
+                            Arguments="service run --data-dir=&quot;[CommonAppDataFolder]Grindvakt&quot;">
+              <!-- Restart after a crash (60 s, every time; the count resets after a day). -->
+              <util:ServiceConfig FirstFailureActionType="restart"
+                                  SecondFailureActionType="restart"
+                                  ThirdFailureActionType="restart"
+                                  RestartServiceDelayInSeconds="60"
+                                  ResetPeriodInDays="1" />
+            </ServiceInstall>
+            <!-- Put grindvakt.exe on the system PATH so `grindvakt init` works from any shell. -->
+            <Environment Id="envPath"
+                         Name="PATH"
+                         Action="set"
+                         Part="last"
+                         System="yes"
+                         Permanent="no"
+                         Value="[INSTALLFOLDER]" />
             <ServiceControl Id="svcControl"
                             Name="Grindvakt"
                             Stop="both"
@@ -47,7 +62,8 @@
           </Component>
         </Directory>
       </Directory>
-      <Directory Id="ProgramDataFolder">
+      <!-- CommonAppDataFolder is Windows Installer's %PROGRAMDATA% (C:\ProgramData\). -->
+      <Directory Id="CommonAppDataFolder">
         <Directory Id="ProgramDataGrindvakt" Name="Grindvakt">
           <Component Id="cmpProgramData" Guid="{0F610D7E-43D9-4D35-9C0E-7B4E0B66F69A}" Permanent="yes" NeverOverwrite="yes" KeyPath="yes">
             <!-- Secure ProgramData\Grindvakt: Owner/Group SYSTEM; protected DACL; LocalService allowed -->
