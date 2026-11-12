@@ -4,6 +4,14 @@ All notable changes to Grindvakt are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Each release depends on the
 [grindvakt-core](https://crates.io/crates/grindvakt-core) version with the same number.
 
+## [Unreleased]
+
+### Changed
+
+- Releases use the shared WeirdBrains release script (`scripts/weirdnet_release.py` with
+  `release.toml`) instead of `scripts/release/release.py`. The grindvakt-core lockstep checks
+  are unchanged: the crate must be on crates.io first, and Cargo.lock must match its checksum.
+
 ## [1.1.4] - 2026-11-12
 
 ### Fixed
