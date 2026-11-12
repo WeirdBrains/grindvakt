@@ -5,9 +5,14 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Grindvakt is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high"/>
 
+    <!-- License pane: WixUI_Minimal shows the BSD-3-Clause license before installing. -->
+    <UIRef Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+
     <Feature Id="MainFeature" Title="Grindvakt" Level="1">
       <ComponentRef Id="cmpExe"/>
       <ComponentRef Id="cmpDocs"/>
+      <ComponentRef Id="cmpLicense"/>
       <ComponentRef Id="cmpProgramData"/>
     </Feature>
 
@@ -36,6 +41,9 @@
           <Component Id="cmpDocs" Guid="{A9E2C2F3-6F73-4F79-BB10-7E9B0A42D9B4}">
             <File Id="filReadme" Source="$(var.RepoRoot)\README.md" Name="README.md" KeyPath="yes" />
             <File Id="filImplNotes" Source="$(var.RepoRoot)\docs\IMPLEMENTATION_NOTES.md" Name="IMPLEMENTATION_NOTES.md" />
+          </Component>
+          <Component Id="cmpLicense" Guid="{03360D07-EE84-4B49-B975-5A92F03FA701}">
+            <File Id="filLicense" Source="$(var.RepoRoot)\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
           </Component>
         </Directory>
       </Directory>
