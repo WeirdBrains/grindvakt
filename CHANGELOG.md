@@ -6,6 +6,8 @@ All notable changes to Grindvakt are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-12
+
 ### Fixed
 
 - Installing an MSI upgrade no longer leaves the Windows service stopped: if it was running
