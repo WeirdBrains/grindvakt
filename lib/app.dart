@@ -1,8 +1,7 @@
 import 'package:jaspr/jaspr.dart';
 import 'package:jaspr/dom.dart';
 
-const String appVersion = '0.7.0';
-
+const String appVersion = '1.0.0';
 class Grindvakt extends StatelessComponent {
   const Grindvakt({super.key});
 
@@ -35,6 +34,7 @@ class Grindvakt extends StatelessComponent {
           a(href: '#setup', [.text('Setup')]),
           a(href: '#security', [.text('Security')]),
           a(href: '#backgrounds', [.text('Backgrounds')]),
+          a(href: 'https://docs.rs/grindvakt-core', [.text('Library')]),
           a(href: 'https://github.com/WeirdBrains/grindvakt/releases/latest', [
             .text('Releases'),
           ]),
@@ -92,8 +92,14 @@ class Grindvakt extends StatelessComponent {
                 'Zero secrets on argv/env/logs.',
           ),
           _feature(
-            'DNSimple integration',
-            'Create/update/no‑op A records with the official SDK. Pagination and idempotency by default.',
+            'DNSimple and DigitalOcean',
+            'Create/update/no‑op A records, with pagination and idempotency by default. '
+                'Duplicate records are never guessed at.',
+          ),
+          _feature(
+            'grindvakt-core library',
+            'The same engine as a Rust crate for your own apps: A, AAAA and TXT records, '
+                'IPv4/IPv6 discovery, plan/apply and the vault. Released in lockstep with the app.',
           ),
           _feature(
             'systemd —user',

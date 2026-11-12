@@ -1,13 +1,13 @@
 use crate::config::{self, AppConfig, ConfigPaths, Provider};
-use crate::dnsclient::DnsAction;
 use crate::ip::PublicIpConsensus;
 use crate::service::InstallUnits;
+use crate::sync::{SyncMode, sync_record};
 use crate::vault::{
     ChangePasswordFlow, CredentialEnrollment, RecoverFlow, VaultInitFlow,
     set_provider_token_interactive, tokens_status_interactive,
     unlock_token_for_provider_interactive,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use std::path::PathBuf;
 use tracing::info;
@@ -119,68 +119,20 @@ impl Sync {
             paths: &paths,
             allow_unattended: !self.no_unattended,
         };
-        let token = unlock_token_for_provider_interactive(ctx, cfg.provider.clone()).await?;
-        let provider = crate::provider::build_active_provider(&cfg, &token).await?;
-        // Resolve public IP after verifying credentials to fail early on missing tokens
+        let token = unlock_token_for_provider_interactive(ctx, cfg.provider).await?;
+        // Check the provider settings before asking the network for the public IP.
+        crate::provider::build_active_provider(&cfg, &token)?;
         let consensus = PublicIpConsensus::default();
         let ip = consensus.resolve().await.context("resolve public IPv4")?;
-        let action = provider
-            .plan_sync_action(&cfg, ip)
+        let mode = if self.dry_run {
+            SyncMode::DryRun
+        } else {
+            SyncMode::Apply
+        };
+        let outcome = sync_record(&cfg, &token, ip, mode)
             .await
-            .context("plan dns action")?;
-
-        match action {
-            DnsAction::Noop(current) => {
-                info!("No change needed: {} -> {}", cfg.record_fqdn(), current);
-            }
-            DnsAction::Create { name, ttl } => {
-                if self.dry_run {
-                    info!(
-                        "DRY RUN: would create A {} = {} (ttl={})",
-                        cfg.record_fqdn(),
-                        ip,
-                        ttl
-                    );
-                } else {
-                    provider
-                        .create_a_record(&cfg, name, ip, ttl)
-                        .await
-                        .context("create a record")?;
-                    info!("Created A {} = {} (ttl={})", cfg.record_fqdn(), ip, ttl);
-                }
-            }
-            DnsAction::Update {
-                record_id,
-                ttl,
-                prev,
-            } => {
-                if self.dry_run {
-                    info!(
-                        "DRY RUN: would update A {}: {} -> {} (ttl={}) [record_id={}]",
-                        cfg.record_fqdn(),
-                        prev,
-                        ip,
-                        ttl,
-                        record_id
-                    );
-                } else {
-                    provider
-                        .update_a_record(&cfg, record_id, ip, ttl)
-                        .await
-                        .context("update a record")?;
-                    info!(
-                        "Updated A {}: {} -> {} (ttl={})",
-                        cfg.record_fqdn(),
-                        prev,
-                        ip,
-                        ttl
-                    );
-                }
-            }
-            DnsAction::Ambiguous { reason } => {
-                bail!("Refusing to modify records due to ambiguity: {reason}");
-            }
-        }
+            .context("sync dns record")?;
+        info!("{outcome}");
         Ok(())
     }
 }
@@ -196,7 +148,7 @@ pub enum ProviderCmd {
     Set {
         #[command(flatten)]
         common: Common,
-        #[arg(value_enum)]
+        /// dnsimple or digitalocean
         to: Provider,
     },
     /// List supported providers and token status (prompts to unlock vault)
@@ -217,7 +169,7 @@ pub enum ProviderTokenCmd {
     Set {
         #[command(flatten)]
         common: Common,
-        #[arg(value_enum)]
+        /// dnsimple or digitalocean
         provider: Provider,
     },
 }

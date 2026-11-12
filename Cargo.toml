@@ -1,8 +1,8 @@
 [package]
 name = "grindvakt"
-version = "0.7.0"
+version = "1.0.0"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.99"
 description = "Grindvakt — a user-mode DNS updater for DNSimple with secure local vault and systemd user timer"
 license = "UNLICENSED"
 repository = ""
@@ -40,39 +40,23 @@ assets = [
 ]
 
 [dependencies]
+# The DNS engine, vault format and private-file handling. Always the exact version that matches
+# this release (lockstep; see docs/RELEASES.md) and always from crates.io.
+grindvakt-core = { version = "=1.0.0", features = ["vault", "standalone"] }
 anyhow = "1.0"
-thiserror = "1.0"
-tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "time", "fs", "process", "signal", "sync"] }
+tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "time", "fs", "process", "signal", "sync", "io-util"] }
 clap = { version = "4.5", features = ["derive", "env"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.8"
 directories = "5.0"
-secrecy = "0.8"
-zeroize = "1.7"
-rand = "0.8"
-argon2 = "0.5"
-hkdf = "0.12"
-bip39 = { version = "1.1", default-features = false, features = ["std", "rand"] }
-base64 = "0.21"
-fs2 = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-dnsimple = "8.0.0"
+secrecy = "0.10"
+rpassword = "7.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-humantime = "2.1"
-tempfile = "3.10"
-sha2 = "0.10"
-blake3 = "1.5"
-regex = "1.10"
-uuid = { version = "1.10", features = ["v4"] }
-chacha20poly1305 = "0.10"
-rpassword = "7.3"
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
-libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3.7"
+sha2 = "0.10"
+libc = "0.2"
 
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -92,8 +76,8 @@ widestring = "1.1"
 
 [dev-dependencies]
 assert_fs = "1.1"
-predicates = "3.0"
-serial_test = "3.1"
+serde_json = "1.0"
+tempfile = "3.10"
 tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "time", "fs"] }
 wiremock = "0.6"
 

@@ -1,6 +1,5 @@
-#![cfg(target_os = "windows")]
 use grindvakt::config::{AppConfig, Schedule};
-use grindvakt::winservice::validate_schedule_windows;
+use grindvakt::schedule::validate_schedule_windows;
 
 fn cfg_with(calendar: Option<&str>, interval: Option<u64>) -> AppConfig {
     AppConfig {

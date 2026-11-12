@@ -1,7 +1,6 @@
-#![cfg(target_os = "windows")]
 use chrono::Timelike;
 use grindvakt::config::{AppConfig, Provider, Schedule};
-use grindvakt::winservice::compute_wait;
+use grindvakt::schedule::compute_wait;
 use std::time::{Duration, SystemTime};
 
 #[test]
