@@ -179,7 +179,7 @@ jobs:
             dist/SHA256SUMS
 
   macos-pkg:
-    name: macOS ARM64 package
+    name: macOS Apple Silicon package
     needs: linux
     runs-on: macos-15
     permissions:
@@ -381,7 +381,7 @@ jobs:
           fail_on_unmatched_files: true
           body: |
             Automated release for ${{ needs.linux.outputs.rel_tag }}.
-            Includes portable x86_64 musl binary (.tar.gz), native Linux installers (.deb, .rpm, .pkg.tar.zst), a macOS ARM64 .pkg, and a Windows x64 .msi. macOS and Windows installers are unsigned.
+            Includes portable x86_64 musl binary (.tar.gz), native Linux installers (.deb, .rpm, .pkg.tar.zst), a macOS Apple Silicon .pkg (Intel Macs are not supported), and a Windows x64 .msi. macOS and Windows installers are unsigned.
           files: |
             dist/grindvakt-x86_64-musl.tar.gz
             dist/grindvakt_${{ needs.linux.outputs.cargo }}_amd64.deb

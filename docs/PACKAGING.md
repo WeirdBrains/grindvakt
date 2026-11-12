@@ -1,6 +1,6 @@
 # Packaging grindvakt (Linux, macOS, Windows)
 
-This repository ships reproducible packaging sources and scripts. Linux packages are built by the tag-triggered Release workflow. macOS ARM64 `.pkg` and Windows x64 `.msi` installers are built on GitHub-hosted runners and attached to the same tag release. You can also build any of these packages locally as described below. Installers are unsigned.
+This repository ships reproducible packaging sources and scripts. Linux packages are built by the tag-triggered Release workflow. macOS Apple Silicon (arm64) `.pkg` and Windows x64 `.msi` installers are built on GitHub-hosted runners and attached to the same tag release. You can also build any of these packages locally as described below. Installers are unsigned.
 
 Binary layout
 - Binary install path: `/usr/bin/grindvakt`
@@ -46,7 +46,9 @@ Arch (.pkg.tar.zst) via makepkg (no rebuild)
   - `scripts/package/make-arch.sh --binary path/to/grindvakt --version X.Y.Z --outdir dist/`
 
 
-macOS ARM64 installer (.pkg)
+macOS Apple Silicon installer (.pkg)
+- Apple Silicon (arm64) only; Intel Macs are not supported. The script refuses a binary that is not thin arm64, sets `hostArchitectures="arm64"` in the distribution, and adds an installation check that stops on Intel Macs with "Apple silicon required".
+- The script checks the built pkg: arm64-only distribution with the Intel check, the License pane, `/usr/local/share/doc/grindvakt/LICENSE`, a thin arm64 payload binary, and no `._*` AppleDouble files.
 - Script: `scripts/package/macos/make-pkg.sh`
 - Requires a prior `cargo build --release` (or set `CARGO_TARGET_DIR` to a tree that already has `release/grindvakt`).
 - Output: `$CARGO_TARGET_DIR/grindvakt-X.Y.Z-macos-arm64.pkg` (unsigned). The installer does not load a launch agent or enroll credentials.
