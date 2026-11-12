@@ -27,6 +27,16 @@ crate did not change:
 `--resume` applies the same checks before it creates a missing tag or pushes, so an app tag is
 never pushed against an unpublished or diverging crate.
 
+## Workflows
+
+`release.yml` (on `v*` tags or manual dispatch) and `pages.yml` (on pushes to main) pin every
+action to a full commit SHA with its version in a comment, check out without persisted
+credentials, and grant each job only the permissions it needs; only the final `release` job can
+write. The repository's default `GITHUB_TOKEN` is read-only, SHA pinning is required, and the
+allowed actions are GitHub-owned actions plus exactly `dart-lang/setup-dart@<sha>` and
+`softprops/action-gh-release@<sha>`. When you bump one of those two, update the allowed-actions
+list in the repository settings to the new SHA in the same change.
+
 Behavior
 
 - Default bump is MINOR when no flags are provided.
