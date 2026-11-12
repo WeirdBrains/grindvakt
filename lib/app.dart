@@ -1,7 +1,7 @@
 import 'package:jaspr/jaspr.dart';
 import 'package:jaspr/dom.dart';
 
-const String appVersion = '1.0.0';
+const String appVersion = '1.1.0';
 class Grindvakt extends StatelessComponent {
   const Grindvakt({super.key});
 
