@@ -86,6 +86,18 @@ pub fn compute_wait(now: std::time::SystemTime, cfg: &AppConfig) -> Result<Durat
     Ok(Duration::from_secs(0))
 }
 
+/// How long the Windows service pauses after a run before it computes the next wait: 60 s for
+/// calendar schedules (so a run that ends inside the boundary minute cannot repeat it), none for
+/// intervals, whose wait already starts after the run. Runs are `interval_secs` apart, not
+/// `interval_secs + 60`.
+pub fn post_run_guard(cfg: &AppConfig) -> Duration {
+    if cfg.schedule.calendar.is_some() {
+        Duration::from_secs(60)
+    } else {
+        Duration::ZERO
+    }
+}
+
 /// Whether a systemd `OnCalendar` expression is acceptable: checked by `systemd-analyze` when it
 /// is installed, otherwise by a conservative heuristic (no newlines, no `%`, at most 256 bytes).
 pub fn validate_calendar(expr: &str) -> bool {

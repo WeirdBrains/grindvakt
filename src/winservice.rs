@@ -14,8 +14,9 @@ use widestring::U16CString;
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::core::PCWSTR;
 use windows_service::service::{
-    ServiceAccess, ServiceControl, ServiceErrorControl, ServiceInfo, ServiceStartType,
-    ServiceState, ServiceType,
+    ServiceAccess, ServiceAction, ServiceActionType, ServiceControl, ServiceErrorControl,
+    ServiceFailureActions, ServiceFailureResetPeriod, ServiceInfo, ServiceStartType, ServiceState,
+    ServiceType,
 };
 use windows_service::service_control_handler::ServiceControlHandlerResult;
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
@@ -23,6 +24,22 @@ use windows_service::{define_windows_service, service_control_handler, service_d
 
 const SERVICE_NAME: &str = "Grindvakt";
 const SERVICE_DISPLAY_NAME: &str = "Grindvakt DNS Updater";
+const SERVICE_DESCRIPTION: &str = "Updates DNS A record on a schedule";
+
+/// Recovery after a crash, the same as the MSI's `ServiceConfigFailureActions`: restart after
+/// 60 s every time, and forget earlier failures after a day.
+fn recovery_actions() -> ServiceFailureActions {
+    let restart = ServiceAction {
+        action_type: ServiceActionType::Restart,
+        delay: Duration::from_secs(60),
+    };
+    ServiceFailureActions {
+        reset_period: ServiceFailureResetPeriod::After(Duration::from_secs(24 * 60 * 60)),
+        reboot_msg: None,
+        command: None,
+        actions: Some(vec![restart.clone(), restart.clone(), restart]),
+    }
+}
 
 pub fn install_service(exe_path: &Path, data_dir: &Path) -> Result<()> {
     // Create SCM connection and register a manual-start service running as LocalService.
@@ -49,9 +66,16 @@ pub fn install_service(exe_path: &Path, data_dir: &Path) -> Result<()> {
     };
     match mgr.create_service(
         &info,
-        ServiceAccess::QUERY_STATUS | ServiceAccess::START | ServiceAccess::STOP,
+        ServiceAccess::QUERY_STATUS
+            | ServiceAccess::START
+            | ServiceAccess::STOP
+            | ServiceAccess::CHANGE_CONFIG,
     ) {
-        Ok(_svc) => {
+        Ok(svc) => {
+            svc.set_description(SERVICE_DESCRIPTION)
+                .context("set service description")?;
+            svc.update_failure_actions(recovery_actions())
+                .context("set service recovery actions")?;
             println!("Installed Windows service '{}'", SERVICE_NAME);
             println!("Start it later via: sc start {}", SERVICE_NAME);
             Ok(())
@@ -70,9 +94,34 @@ pub fn run_service() -> Result<()> {
 
 fn service_main(_args: Vec<OsString>) {
     if let Err(e) = real_service_main() {
-        let msg = U16CString::from_str(format!("Grindvakt service error: {e}")).unwrap();
-        unsafe {
-            OutputDebugStringW(PCWSTR::from_raw(msg.as_ptr()));
+        report_outside_log(&format!("Grindvakt service error: {e:#}"));
+    }
+}
+
+/// Reports a problem that cannot go to `service.log`: to the debugger and as an error in the
+/// Windows Application event log (source "Grindvakt"), so a service without a log is visible.
+fn report_outside_log(msg: &str) {
+    use windows::Win32::System::EventLog::{
+        DeregisterEventSource, EVENTLOG_ERROR_TYPE, RegisterEventSourceW, ReportEventW,
+    };
+    let Ok(text) = U16CString::from_str(msg.replace('\0', " ")) else {
+        return;
+    };
+    unsafe {
+        OutputDebugStringW(PCWSTR::from_raw(text.as_ptr()));
+        if let Ok(source) = RegisterEventSourceW(PCWSTR::null(), windows::core::w!("Grindvakt")) {
+            let strings = [PCWSTR::from_raw(text.as_ptr())];
+            let _ = ReportEventW(
+                source,
+                EVENTLOG_ERROR_TYPE,
+                0,
+                1,
+                None,
+                0,
+                Some(&strings),
+                None,
+            );
+            let _ = DeregisterEventSource(source);
         }
     }
 }
@@ -80,11 +129,11 @@ fn service_main(_args: Vec<OsString>) {
 fn real_service_main() -> Result<()> {
     // Initialize file logging under ProgramData\Grindvakt
     if let Err(e) = init_service_logging() {
-        let msg = U16CString::from_str(format!("Grindvakt logging init failed: {e}")).unwrap();
-        unsafe {
-            OutputDebugStringW(PCWSTR::from_raw(msg.as_ptr()));
-        }
+        report_outside_log(&format!(
+            "Grindvakt cannot write service.log, so it logs nothing else: {e:#}"
+        ));
     }
+    info!("service starting (grindvakt {})", env!("CARGO_PKG_VERSION"));
     // Shared state for stop signal and current status
     let pair = Arc::new((Mutex::new(false), Condvar::new()));
     let pair_for_ctrl = Arc::clone(&pair);
@@ -175,6 +224,7 @@ fn real_service_main() -> Result<()> {
             };
         }
     }
+    info!("service stopping");
     // Signal received; now wait for worker to finish, reporting StopPending checkpoints
     let mut checkpoint: u32 = 1;
     while !worker.is_finished() {
@@ -193,6 +243,7 @@ fn real_service_main() -> Result<()> {
         thread::sleep(Duration::from_millis(200));
     }
     let _ = worker.join();
+    info!("service stopped");
 
     // Report stop pending then stopped
     status_handle
@@ -245,6 +296,7 @@ fn worker_loop(pair: Arc<(Mutex<bool>, Condvar)>) -> Result<()> {
             .as_deref(),
     )
     .context("resolve data dir")?;
+    info!("data dir {}", paths.data_dir.display());
 
     loop {
         if match pair.0.lock() {
@@ -281,10 +333,12 @@ fn worker_loop(pair: Arc<(Mutex<bool>, Condvar)>) -> Result<()> {
         }
         // Perform one sync pass with unattended-only unlock
         if let Err(e) = do_sync_once_unattended(&rt, &paths, &cfg) {
-            error!("sync failed: {}", e);
+            error!("sync failed: {:#}", e);
         }
-        // Guard against rapid loop; enforce at least 60s between runs
-        if sleep_minimum(&pair, Duration::from_secs(60))? {
+        // Calendar schedules wait out the rest of the boundary minute so one boundary never
+        // runs twice; interval schedules already wait at least 60 s.
+        let guard = crate::schedule::post_run_guard(&cfg);
+        if !guard.is_zero() && sleep_minimum(&pair, guard)? {
             break;
         }
     }
@@ -385,6 +439,7 @@ fn init_service_logging() -> Result<()> {
         .open(&log_path)?;
     let _ = tracing_subscriber::fmt()
         .with_target(false)
+        .with_ansi(false)
         .with_writer(file)
         .try_init();
     Ok(())
