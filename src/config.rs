@@ -66,7 +66,7 @@ fn default_credstore_dir() -> Result<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn default_credstore_dir() -> Result<PathBuf> {
-    // Shared credentials directory under ProgramData; readable by LocalService only.
+    // Shared credentials directory under ProgramData; readable by SYSTEM, Administrators and NT SERVICE\Grindvakt only.
     Ok(program_data_dir()?.join("Grindvakt").join("credentials"))
 }
 

@@ -15,14 +15,17 @@ use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::core::PCWSTR;
 use windows_service::service::{
     ServiceAccess, ServiceAction, ServiceActionType, ServiceControl, ServiceErrorControl,
-    ServiceFailureActions, ServiceFailureResetPeriod, ServiceInfo, ServiceStartType, ServiceState,
-    ServiceType,
+    ServiceFailureActions, ServiceFailureResetPeriod, ServiceInfo, ServiceSidType,
+    ServiceStartType, ServiceState, ServiceType,
 };
 use windows_service::service_control_handler::ServiceControlHandlerResult;
 use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 use windows_service::{define_windows_service, service_control_handler, service_dispatcher};
 
-const SERVICE_NAME: &str = "Grindvakt";
+use crate::fsutil::SERVICE_NAME;
+/// The service's own virtual account. Its SID only exists for this service, so nothing else
+/// running as LocalService can read the vault or the unattended credential.
+const SERVICE_ACCOUNT: &str = r"NT SERVICE\Grindvakt";
 const SERVICE_DISPLAY_NAME: &str = "Grindvakt DNS Updater";
 const SERVICE_DESCRIPTION: &str = "Updates DNS A record on a schedule";
 
@@ -42,7 +45,8 @@ fn recovery_actions() -> ServiceFailureActions {
 }
 
 pub fn install_service(exe_path: &Path, data_dir: &Path) -> Result<()> {
-    // Create SCM connection and register a manual-start service running as LocalService.
+    // Register (or, for an older install, reconfigure) a manual-start service that runs as its
+    // own virtual account.
     let mgr = ServiceManager::local_computer(
         None::<&str>,
         ServiceManagerAccess::CREATE_SERVICE | ServiceManagerAccess::CONNECT,
@@ -61,29 +65,52 @@ pub fn install_service(exe_path: &Path, data_dir: &Path) -> Result<()> {
             OsString::from(format!("--data-dir={}", data_dir.display())),
         ],
         dependencies: vec![],
-        account_name: Some(OsString::from(r"NT AUTHORITY\LocalService")),
+        account_name: Some(OsString::from(SERVICE_ACCOUNT)),
         account_password: None,
     };
-    match mgr.create_service(
-        &info,
-        ServiceAccess::QUERY_STATUS
-            | ServiceAccess::START
-            | ServiceAccess::STOP
-            | ServiceAccess::CHANGE_CONFIG,
-    ) {
-        Ok(svc) => {
-            svc.set_description(SERVICE_DESCRIPTION)
-                .context("set service description")?;
-            svc.update_failure_actions(recovery_actions())
-                .context("set service recovery actions")?;
-            println!("Installed Windows service '{}'", SERVICE_NAME);
-            println!("Start it later via: sc start {}", SERVICE_NAME);
-            Ok(())
+    let access = ServiceAccess::QUERY_STATUS
+        | ServiceAccess::START
+        | ServiceAccess::STOP
+        | ServiceAccess::CHANGE_CONFIG;
+    let (svc, verb) = match mgr.create_service(&info, access) {
+        Ok(svc) => (svc, "Installed"),
+        Err(create_err) => {
+            let Ok(svc) = mgr.open_service(SERVICE_NAME, access) else {
+                bail!("create service failed: {create_err}");
+            };
+            svc.change_config(&info)
+                .context("update the existing service's configuration")?;
+            (svc, "Updated")
         }
-        Err(e) => {
-            bail!("create service failed: {}", e);
-        }
+    };
+    svc.set_config_service_sid_info(ServiceSidType::Unrestricted)
+        .context("give the service its own SID")?;
+    svc.set_description(SERVICE_DESCRIPTION)
+        .context("set service description")?;
+    svc.update_failure_actions(recovery_actions())
+        .context("set service recovery actions")?;
+    println!("{verb} Windows service '{SERVICE_NAME}' (runs as {SERVICE_ACCOUNT})");
+    repair_data_dir(&ConfigPaths::resolve(Some(data_dir))?)?;
+    println!("Start it later via: sc start {SERVICE_NAME}");
+    Ok(())
+}
+
+/// `grindvakt service repair-acl`: what the MSI runs (as SYSTEM) on install and upgrade, so a
+/// data dir written by 1.1.x (LocalService) becomes readable by the service account only.
+pub fn repair_data_dir(paths: &ConfigPaths) -> Result<()> {
+    let mut dirs = vec![paths.data_dir.as_path()];
+    if !paths.credstore_dir.starts_with(&paths.data_dir) {
+        dirs.push(paths.credstore_dir.as_path());
     }
+    for dir in dirs {
+        let n = crate::fsutil::repair_tree(dir)
+            .with_context(|| format!("restrict {} to the service account", dir.display()))?;
+        println!(
+            "{}: {n} entries restricted to SYSTEM, Administrators and {SERVICE_ACCOUNT}",
+            dir.display()
+        );
+    }
+    Ok(())
 }
 
 define_windows_service!(ffi_service_main, service_main);

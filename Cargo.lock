@@ -996,9 +996,9 @@ dependencies = [
 
 [[package]]
 name = "grindvakt-core"
-version = "1.1.4"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b79ed9cef9aeaf059fdeadfbc99bacf9bf409c381942babc81ae37b3e9d909a"
+checksum = "8245f65270e588e20322d76d9702054aff0da736a4e6805de4025f2d59269f43"
 dependencies = [
  "base64 0.21.7",
  "chrono",
