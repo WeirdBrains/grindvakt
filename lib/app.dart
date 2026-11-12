@@ -2,6 +2,7 @@ import 'package:jaspr/jaspr.dart';
 import 'package:jaspr/dom.dart';
 
 const String appVersion = '0.7.0';
+
 class Grindvakt extends StatelessComponent {
   const Grindvakt({super.key});
 
@@ -48,12 +49,14 @@ class Grindvakt extends StatelessComponent {
                 .text(
                   'Grindvakt keeps your A record updated to your real public IPv4, '
                   'secured with an encrypted vault and a 24‑word recovery key. '
-                  'Built in Rust. systemd —user, no root daemons.',
+                  'Built in Rust. User-mode on Linux (systemd —user), macOS (launchd), '
+                  'and Windows (manual-start service).',
                 ),
               ]),
               div(classes: 'cta', [
                 a(
-                  href: 'https://github.com/WeirdBrains/grindvakt/releases/tag/v$appVersion',
+                  href:
+                      'https://github.com/WeirdBrains/grindvakt/releases/tag/v$appVersion',
                   classes: 'btn version',
                   [.text('v$appVersion')],
                 ),
@@ -101,38 +104,65 @@ class Grindvakt extends StatelessComponent {
           h2([.text('Install')]),
           p([
             .text(
-              'Download an installer or the portable tarball from the latest private GitHub release (access required).',
+              'Download an installer or the portable tarball from the v$appVersion GitHub release. '
+              'The macOS package and Windows MSI are unsigned. They do not start a service, '
+              'load a launch agent, or enroll credentials.',
             ),
           ]),
           ul(classes: 'downloads', [
             li([
               a(
                 href:
-                    'https://github.com/WeirdBrains/grindvakt/releases/latest',
+                    'https://github.com/WeirdBrains/grindvakt/releases/download/v$appVersion/grindvakt-x86_64-musl.tar.gz',
                 [.text('Linux x86_64 (musl, tar.gz)')],
               ),
             ]),
             li([
               a(
                 href:
-                    'https://github.com/WeirdBrains/grindvakt/releases/latest',
+                    'https://github.com/WeirdBrains/grindvakt/releases/download/v$appVersion/grindvakt_${appVersion}_amd64.deb',
                 [.text('Debian/Ubuntu (.deb)')],
               ),
             ]),
             li([
               a(
                 href:
-                    'https://github.com/WeirdBrains/grindvakt/releases/latest',
+                    'https://github.com/WeirdBrains/grindvakt/releases/download/v$appVersion/grindvakt-$appVersion-1.x86_64.rpm',
                 [.text('Fedora/RHEL (.rpm) — unsigned (use --nosignature)')],
               ),
             ]),
             li([
               a(
                 href:
-                    'https://github.com/WeirdBrains/grindvakt/releases/latest',
+                    'https://github.com/WeirdBrains/grindvakt/releases/download/v$appVersion/grindvakt-$appVersion-1-x86_64.pkg.tar.zst',
                 [.text('Arch Linux (.pkg.tar.zst)')],
               ),
             ]),
+            li([
+              a(
+                href:
+                    'https://github.com/WeirdBrains/grindvakt/releases/download/v$appVersion/grindvakt-$appVersion-macos-arm64.pkg',
+                [.text('macOS ARM64 (.pkg) — unsigned')],
+              ),
+            ]),
+            li([
+              a(
+                href:
+                    'https://github.com/WeirdBrains/grindvakt/releases/download/v$appVersion/grindvakt-$appVersion-windows-x64.msi',
+                [.text('Windows x64 (.msi) — unsigned, manual-start')],
+              ),
+            ]),
+          ]),
+          p([
+            .text('After the Windows MSI, run '),
+            code([.text('grindvakt service install')]),
+            .text(', enroll with '),
+            code([.text('grindvakt service enroll-credential')]),
+            .text(' (elevated), then start with '),
+            code([.text('sc start Grindvakt')]),
+            .text('. After the macOS package, install the LaunchAgent with '),
+            code([.text('grindvakt service install')]),
+            .text(' and load it later with launchctl. Linux setup is below.'),
           ]),
         ]),
         section(id: 'setup', classes: 'setup', [
