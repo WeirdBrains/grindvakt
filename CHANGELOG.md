@@ -6,8 +6,19 @@ All notable changes to Grindvakt are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Installing an MSI upgrade no longer leaves the Windows service stopped: if it was running
+  before the upgrade, it is started again afterwards.
+
 ### Changed
 
+- The Windows service runs as its own virtual account, `NT SERVICE\Grindvakt`, instead of
+  `NT AUTHORITY\LocalService`. The data dir, vault and credential are readable only by SYSTEM,
+  Administrators and that account. Upgrading from 1.1.x re-ACLs the existing files for the new
+  account (the MSI does it, as does `grindvakt service install`, which now updates an existing
+  service instead of failing). Requires grindvakt-core 1.2.0.
+- The MSI is built with WiX Toolset 7.0.1 (was 3.14.1).
 - Releases use the shared WeirdBrains release script (`scripts/weirdnet_release.py` with
   `release.toml`) instead of `scripts/release/release.py`. The grindvakt-core lockstep checks
   are unchanged: the crate must be on crates.io first, and Cargo.lock must match its checksum.
