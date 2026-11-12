@@ -58,18 +58,20 @@ macOS Apple Silicon installer (.pkg)
 
 Windows x64 installer (.msi)
 - Script: `scripts/package/windows/make-msi.ps1`
-- Requires WiX v3.14.1 (`candle.exe`, `light.exe`, with the bundled WixUIExtension and WixUtilExtension) and a prior `cargo build --release` producing `grindvakt.exe`.
-- Official WiX 3.14.1 portable zip (hash must match before use):
-  - URL: `https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip`
-  - SHA-256: `6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31`
+- Requires the WiX Toolset 7.0.1 CLI (`wix.exe`) with `WixToolset.UI.wixext` and `WixToolset.Util.wixext` 7.0.1, and a prior `cargo build --release` producing `grindvakt.exe`.
+- WiX 7 is used under the Open Source Maintenance Fee EULA v1.1 (https://docs.firegiant.com/wix/osmf/), which Michael accepted on 2026-11-12; every `wix` command passes `-acceptEula wix7` (see docs/RELEASES.md).
+- Official WiX 7.0.1 CLI installer (hash must match before use; CI installs it the same way):
+  - URL: `https://github.com/wixtoolset/wix/releases/download/v7.0.1/wix-cli-x64.msi`
+  - SHA-256: `93673c89ab33b1fd3f07ad5e609b7cae694bd716b2914259b61a41c02303b64c`
+  - `msiexec /i wix-cli-x64.msi /qn`, then `wix extension add -acceptEula wix7 -g WixToolset.UI.wixext/7.0.1 WixToolset.Util.wixext/7.0.1`; `wix.exe` is in `C:\Program Files\WiX Toolset v7.0\bin`.
 - Build:
   - `powershell -File scripts/package/windows/make-msi.ps1 -ExeSource path\to\grindvakt.exe -ProductVersion X.Y.Z -OutDir dist`
   - Output: `dist/grindvakt-X.Y.Z-windows-x64.msi` (unsigned).
-- The MSI installs a manual-start LocalService (restart 60 s after a crash), creates a protected `%PROGRAMDATA%\Grindvakt` folder (Windows Installer's `CommonAppDataFolder`) that the service uses as its data dir, adds the install folder to the system PATH, and never auto-starts or enrolls credentials. ProgramData is `Permanent`/`NeverOverwrite`, so uninstalling keeps config, vault and credential. Upgrades stop the service. After install, in an elevated shell:
+- The MSI installs a manual-start service running as `NT SERVICE\Grindvakt` (restart 60 s after a crash), creates a protected `%PROGRAMDATA%\Grindvakt` folder (Windows Installer's `CommonAppDataFolder`) that the service uses as its data dir, adds the install folder to the system PATH, and never auto-starts or enrolls credentials. ProgramData is `Permanent`/`NeverOverwrite`, so uninstalling keeps config, vault and credential. The data dir's protected DACL names only SYSTEM, Administrators and `NT SERVICE\Grindvakt`. Upgrades (1.1.x included, same UpgradeCode, `MajorUpgrade` after `InstallInitialize`) note whether the service was running, re-ACL everything already in `%PROGRAMDATA%\Grindvakt` for the new account (`grindvakt service repair-acl`, as SYSTEM), and start the service again if it was running. After install, in an elevated shell:
   - `grindvakt init` (writes config and vault to `%PROGRAMDATA%\Grindvakt`)
   - `grindvakt service enroll-credential` (machine-scope DPAPI)
   - `sc start Grindvakt`
-- `make-msi.ps1` checks the built MSI: license, data dir under `CommonAppDataFolder`, service arguments, PATH entry and restart-on-failure actions.
+- `make-msi.ps1` checks the built MSI: license, data dir under `CommonAppDataFolder`, service arguments, PATH entry, restart-on-failure actions, the service account and data dir ACL, and the order of the upgrade custom actions. The check that remembers a running service is an immediate action before `InstallInitialize`: Windows Installer refuses (error 2613) any deferred action ahead of `RemoveExistingProducts`.
 
 Install/uninstall (examples)
 - Debian:

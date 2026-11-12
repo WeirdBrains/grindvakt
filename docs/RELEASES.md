@@ -56,6 +56,14 @@ not change:
    checksums, and attaches them to the GitHub release. `assets X.Y.Z` checks the release against
    the `[[platforms]]` list in `release.toml`.
 
+## WiX 7 licence
+
+The Windows MSI is built with WiX Toolset 7, whose binaries are distributed under the Open Source
+Maintenance Fee EULA v1.1 (https://docs.firegiant.com/wix/osmf/). **Michael accepted the WiX 7
+OSMF EULA for Grindvakt on 2026-11-12.** On that basis `make-msi.ps1` and `release.yml` pass
+`-acceptEula wix7` to every `wix` command. Revisit this if the EULA's terms or the project's
+revenue change (the EULA asks no fee below US$10,000 a year).
+
 The old `scripts/release/release.py` (and its `--resume`) was replaced by the shared script in
 1.2.0; a failed push is retried with the printed command instead.
 
