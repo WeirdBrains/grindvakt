@@ -48,19 +48,49 @@ class Fixture:
             "other.txt": ("100644", "c" * 40),
         }
         self.post_mismatch = False
+        # Fake crates.io: every grindvakt-core version is published unless listed here.
+        self.core_unpublished = set()
+        self.core_yanked = set()
+        self.crates_io_calls = []
         self.write_version("0.4.2")
+
+    @staticmethod
+    def core_checksum(v: str) -> str:
+        return (v.replace(".", "") * 64)[:64]
+
+    def crates_io(self, v: str):
+        self.crates_io_calls.append(v)
+        if v in self.core_unpublished:
+            return None
+        return {"num": v, "checksum": self.core_checksum(v), "yanked": v in self.core_yanked}
+
+    def write_core_lock(self, v: str, checksum: str | None = None) -> None:
+        lock = self.root / "Cargo.lock"
+        text = lock.read_text()
+        head, _, _ = text.partition('[[package]]\nname = "grindvakt-core"')
+        lock.write_text(
+            head
+            + '[[package]]\nname = "grindvakt-core"\nversion = "'
+            + v
+            + '"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "'
+            + (checksum or self.core_checksum(v))
+            + '"\n'
+        )
 
     def write_version(self, v: str) -> None:
         (self.root / "Cargo.toml").write_text(
             '[package]\nname = "grindvakt"\nversion = "'
             + v
-            + '"\n\n[dependencies]\nfoo = "1"\n'
+            + '"\n\n[dependencies]\ngrindvakt-core = { version = "='
+            + v
+            + '", features = ["vault"] }\nfoo = "1"\n'
         )
         (self.root / "Cargo.lock").write_text(
             'version = 4\n\n[[package]]\nname = "dependency"\nversion = "1.2.3"\n\n[[package]]\nname = "grindvakt"\nversion = "'
             + v
-            + '"\n'
+            + '"\n\n'
         )
+        self.write_core_lock(v)
         (self.root / "pubspec.yaml").write_text("name: grindvakt\nversion: " + v + "\n\nenvironment:\n  sdk: ^3.10.0\n")
         app = self.root / "lib" / "app.dart"
         app.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +111,9 @@ class Fixture:
         out = ""
         if cmd[0] == "cargo":
             rc = 1 if self.fail == cmd[1] else 0
+            if cmd[1] == "update" and not rc:
+                # cargo update -p grindvakt-core --precise X.Y.Z
+                self.write_core_lock(cmd[-1], getattr(self, "lock_checksum_override", None))
         else:
             assert cmd[0] == "git", cmd
             a = cmd[1:]
@@ -177,6 +210,8 @@ class Tests(unittest.TestCase):
         self.cwd = os.getcwd()
         self.mock = patch.object(mod, "run", self.f.run)
         self.mock.start()
+        self.crates = patch.object(mod, "crates_io_core_version", self.f.crates_io)
+        self.crates.start()
         self.stdout = io.StringIO()
         self.stderr = io.StringIO()
         self.o = contextlib.redirect_stdout(self.stdout)
@@ -187,6 +222,7 @@ class Tests(unittest.TestCase):
     def tearDown(self):
         os.chdir(self.cwd)
         self.mock.stop()
+        self.crates.stop()
         self.o.__exit__(None, None, None)
         self.e.__exit__(None, None, None)
         self.tmp.cleanup()
@@ -347,7 +383,8 @@ class Tests(unittest.TestCase):
     def test_gate_failure_short_circuits(self):
         self.f.fail = "fmt"
         self.assertNotEqual(self.call(), 0)
-        self.assertEqual([c[1] for c in self.f.calls if c[0] == "cargo"], ["fmt"])
+        # The grindvakt-core lock refresh runs before the gates; the gates stop at the first failure.
+        self.assertEqual([c[1] for c in self.f.calls if c[0] == "cargo"], ["update", "fmt"])
 
     def test_commit_failure_preserves_unrelated_stage(self):
         self.f.fail = "commit"

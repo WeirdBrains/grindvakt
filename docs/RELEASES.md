@@ -6,6 +6,27 @@ The canonical entrypoint is:
 scripts/release/release.py [--dry-run] [--resume] [--patch|--major] [--to X.Y.Z]
 ```
 
+## grindvakt-core lockstep
+
+The app is built on [grindvakt-core](https://crates.io/crates/grindvakt-core)
+([repo](https://github.com/WeirdBrains/grindvakt-core)). Their versions move together: Grindvakt
+vX.Y.Z depends on `grindvakt-core = "=X.Y.Z"` from crates.io, never a path, git or `[patch]`
+override. Every app release therefore needs the matching crate published first, even when the
+crate did not change:
+
+1. In grindvakt-core: add the `## [X.Y.Z]` CHANGELOG section and run `scripts/release.py X.Y.Z`.
+   It runs its gates, tags vX.Y.Z, pushes code and tag together, runs `cargo publish`, and waits
+   until crates.io serves X.Y.Z with the checksum of the local `.crate`.
+2. In this repo: stage the app changes and run `scripts/release/release.py` with the bump that
+   lands on X.Y.Z. Before touching any file it asks crates.io for grindvakt-core X.Y.Z and stops
+   if it is missing or yanked. It then pins the dependency to `"=X.Y.Z"`, runs
+   `cargo update -p grindvakt-core --precise X.Y.Z`, and refuses to continue unless Cargo.lock
+   has exactly that version from crates.io with the checksum crates.io reports. Only then do the
+   gates, the commit, the tag and the push run.
+
+`--resume` applies the same checks before it creates a missing tag or pushes, so an app tag is
+never pushed against an unpublished or diverging crate.
+
 Behavior
 
 - Default bump is MINOR when no flags are provided.
@@ -20,7 +41,8 @@ Guards and gates
 
 - Requires a clean working tree and branch `main` tracking `origin/main`.
 - Monotonic version check against the highest local and remote stable tags.
-- Version bump is written to Cargo.toml, the root package entry in Cargo.lock, the `version:` field in pubspec.yaml, and `appVersion` in lib/app.dart. The version link (`classes: 'btn version'`) builds its href and label from `$appVersion`, so it always points at `releases/tag/v` plus the current version. Gates then run in order:
+- grindvakt-core X.Y.Z must be published on crates.io (not yanked); otherwise the script stops before any edit, including in `--dry-run`.
+- Version bump is written to Cargo.toml (the package version and the `grindvakt-core = "=X.Y.Z"` pin), the root package entry in Cargo.lock, the `version:` field in pubspec.yaml, and `appVersion` in lib/app.dart; Cargo.lock is refreshed with `cargo update -p grindvakt-core --precise X.Y.Z` and must then match the crates.io version and checksum. The version link (`classes: 'btn version'`) builds its href and label from `$appVersion`, so it always points at `releases/tag/v` plus the current version. Gates then run in order:
   - `cargo fmt --all --check`
   - `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
   - `cargo test --workspace --all-features --locked`
@@ -33,6 +55,7 @@ Guards and gates
 Notes
 
 - The script never moves or overwrites existing tags (local or remote).
-- Dry-run is strictly read-only and does not fetch; tag/branch checks use `git ls-remote` only.
+- Dry-run is strictly read-only and does not fetch; tag/branch checks use `git ls-remote` only, and the grindvakt-core check is a read-only crates.io API request.
+- Tests: `python3 -m pytest release-tests` (offline; git, cargo and crates.io are faked).
  
 

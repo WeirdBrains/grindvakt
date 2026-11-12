@@ -6,11 +6,18 @@ Secure, user-mode DNS updater for DNSimple and DigitalOcean. Rust CLI with:
 - Local encrypted vault under `~/.grindvakt` with password unlock and 24‑word recovery
 - systemd --user oneshot service + configurable timer (no root/system units)
 - macOS launchd per-user agent (no autoload; install via CLI)
+- Windows service (manual start) with a DPAPI unattended credential
+
+The DNS engine, vault format and private-file handling live in the
+[grindvakt-core](https://crates.io/crates/grindvakt-core) library
+([docs](https://docs.rs/grindvakt-core), [repo](https://github.com/WeirdBrains/grindvakt-core)),
+which other apps can embed. This app pins `grindvakt-core = "=X.Y.Z"` from crates.io at its own
+version X.Y.Z; see `docs/RELEASES.md` for the lockstep release order.
 
 No web UI. No background daemons installed automatically. No live DNS or service changes unless you run commands explicitly (supports `--dry-run`).
 
 Quick start (development)
-- Install stable Rust >= 1.87 and systemd (user manager).
+- Install stable Rust >= 1.99 and systemd (user manager).
 - On alien-blue, prefer scratch target for builds:
   - `export CARGO_TARGET_DIR=/mnt/ext1/cargo-target` (fallback `/mnt/ext5t/cargo-target`)
   - Build: `cargo build --release`

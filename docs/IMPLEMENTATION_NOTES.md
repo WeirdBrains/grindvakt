@@ -1,22 +1,19 @@
 ### Grindvakt — Implementation Notes
 
 Key components
-- `src/ip.rs`: Resolve public IPv4 via 4 independent HTTPS sources using `reqwest` with rustls. Majority consensus (>=2 agreeing) and strict IPv4 global filtering.
-- `src/dnsclient.rs`: DNSimple integration via the official `dnsimple` crate (8.x). Idempotent create/update/noop with pagination and name-type exact match; safe duplicate handling and `--dry-run` planning.
-- `src/provider.rs`: Provider dispatch for DNSimple and DigitalOcean. DigitalOcean uses `reqwest` against `v2/domains/:domain/records`, with idempotent plan+create+update, A-only filtering, fixed-host pagination cap (50 pages), and fail-fast on 401/403/429.
-- `src/vault.rs`: Local encrypted vault in `~/.grindvakt/vault.json`. Secrets (provider tokens) are encrypted with a random 32-byte DEK using XChaCha20-Poly1305 in a canonical JSON shape:
-  `{ "dnsimple_token": "<string|null>", "digitalocean_token": "<string|null>" }`.
-  Missing fields default to null to preserve legacy vaults that only have `dnsimple_token`.
-  The DEK is wrapped twice:
-  - Password-derived Argon2id key (bounded params, independent salt).
-  - Recovery-derived HKDF-SHA256 key from a 24-word BIP39 phrase (independent salt).
-  Versioned authenticated format with clear AAD, atomic write, and strict file/dir permissions.
+- [grindvakt-core](https://crates.io/crates/grindvakt-core) (`=X.Y.Z`, same version as the app, from crates.io) provides the engine: providers (DNSimple via the official `dnsimple` crate, DigitalOcean over `reqwest`/rustls) behind a `DnsProvider` trait, plan/apply with ambiguity refusal, IPv4/IPv6 discovery by strict majority, the vault format and crypto, the config file format, private file writes, and the single-instance lock. The app adds the CLI, prompts, OS credential stores and services.
+- `src/ip.rs`: `PublicIpConsensus` over `grindvakt_core::ip::discover` (IPv4 only, at least two agreeing sources, non-global answers rejected).
+- `src/provider.rs`, `src/sync.rs`: build the configured provider and run one `grindvakt_core::sync::sync_once` pass (create/update/no-op of the A record, `--dry-run` planning, refusal on duplicates).
+- `src/vault.rs`: prompts and unattended credentials around `grindvakt_core::vault`. The vault (`~/.grindvakt/vault.json`) is unchanged from 0.x: provider tokens encrypted with a random 32-byte DEK using XChaCha20-Poly1305 in the canonical JSON shape
+  `{ "dnsimple_token": "<string|null>", "digitalocean_token": "<string|null>" }`, with the DEK wrapped by an Argon2id password key and by an HKDF-SHA256 key from a 24-word BIP39 phrase.
+- `src/fsutil.rs`: private writes via `grindvakt_core::fs`. Linux/macOS use owner-only modes (`Privacy::CurrentUser`); Windows uses the service-grade protected DACL (`Privacy::Service`: SYSTEM, Administrators, LocalService) because the service reads the data directory.
+- `src/schedule.rs`: the app owns scheduling (the library stores the schedule but never runs it): `OnCalendar` validation through `systemd-analyze` with a heuristic fallback, and the Windows service's supported calendars (`hourly`, `daily`, `*:0/10`) and `compute_wait`.
 - `src/service.rs`:
   - Linux: systemd --user oneshot `grindvakt.service` and configurable `grindvakt.timer`. Optional TPM2-bound unattended credential enrollment via `systemd-creds --user encrypt --with-key=host+tpm2` producing `~/.config/systemd/user/credstore.encrypted/grindvakt.dek.enc` and `LoadCredentialEncrypted=` in the unit.
   - macOS: per-user launchd agent `.plist` with `ProgramArguments = [<exe>, sync, --data-dir=...]`, `StartInterval` for interval schedules, and simple StartCalendarInterval mapping for `daily`. Logs to `~/Library/Logs/Grindvakt/`. CLI prints and installs the agent but does not load it.
   - Windows: SCM service under `NT AUTHORITY\\LocalService`, manual start. Program data at `%PROGRAMDATA%\\Grindvakt`; service log `service.log` lives there. Unattended credential is a machine‑scoped DPAPI blob at `%PROGRAMDATA%\\Grindvakt\\credentials\\grindvakt.dek.dpapi`. The ProgramData directory is created with a protected DACL (SYSTEM/Administrators/LocalService only); user‑owned preexisting directories are rejected.
-- `src/config.rs`: TOML config parser and normalizer, with schedule either `interval_secs` (default 300) or `calendar`.
-- `src/lock.rs`: Flock preventing overlap (service/manual).
+- `src/config.rs`: data paths and config load/save around `grindvakt_core::config::AppConfig` (schedule either `interval_secs`, default 300, or `calendar`).
+- `src/lock.rs`: `grindvakt_core::lock::SingleInstanceLock`, preventing overlap (service/manual).
 
 CLI commands
 - `init`: interactive config + vault creation; prints 24-word recovery and requires confirmation echo.
@@ -41,7 +38,7 @@ Testing (to be run on alien-blue; heavy runs are intentionally skipped here)
   - `cargo test --all`
   - Tests use tempdirs via `--data-dir`; no access to real `~/.grindvakt`.
 - Mock DNSimple integration:
-  - `dnsclient` honors `api_base_url` so tests can run against a local mock server (e.g. `wiremock`).
+  - Providers honor `api_base_url` so tests can run against a local mock server (`tests/sync_mock.rs` uses `wiremock`).
 
 Build/test workflow on alien-blue
 - Set scratch target and clean after:

@@ -2,7 +2,7 @@
 
 use crate::config::{self, AppConfig, ConfigPaths};
 use crate::ip::PublicIpConsensus;
-use crate::provider::build_active_provider;
+use crate::sync::{SyncMode, sync_record};
 use anyhow::{Context, Result, bail};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -291,81 +291,7 @@ fn worker_loop(pair: Arc<(Mutex<bool>, Condvar)>) -> Result<()> {
     Ok(())
 }
 
-pub fn validate_schedule_windows(cfg: &AppConfig) -> Result<()> {
-    // Enforce mutual exclusion and raw calendar validation first.
-    let cal_opt = cfg.schedule.calendar.as_ref();
-    let int_opt = cfg.schedule.interval_secs;
-    if cal_opt.is_some() && int_opt.is_some() {
-        bail!("schedule must not set both calendar and interval_secs");
-    }
-    // Reject raw calendar containing newline/'%' or overly long
-    if let Some(raw) = cal_opt {
-        if raw.contains('\n') || raw.contains('%') || raw.len() > 256 {
-            bail!("invalid calendar expression");
-        }
-        let t = raw.trim().to_lowercase();
-        match t.as_str() {
-            "daily" | "hourly" | "*:0/10" => Ok(()),
-            other => bail!("unsupported calendar expression: {}", other),
-        }
-    } else if let Some(secs) = int_opt {
-        if secs < 60 {
-            bail!("interval_secs must be >= 60");
-        }
-        Ok(())
-    } else {
-        bail!("schedule must set either calendar or interval_secs");
-    }
-}
-pub fn compute_wait(now: std::time::SystemTime, cfg: &AppConfig) -> Result<Duration> {
-    if let Some(secs) = cfg.schedule.interval_secs {
-        return Ok(Duration::from_secs(secs.max(60)));
-    }
-    if let Some(cal) = &cfg.schedule.calendar {
-        let t = cal.trim().to_lowercase();
-        use chrono::{Local, LocalResult, TimeZone, Timelike};
-        let now_dt: chrono::DateTime<Local> = now.into();
-        return Ok(match t.as_str() {
-            "hourly" => {
-                let next = now_dt
-                    .with_minute(0)
-                    .unwrap()
-                    .with_second(0)
-                    .unwrap()
-                    .with_nanosecond(0)
-                    .unwrap()
-                    + chrono::Duration::hours(1);
-                (next - now_dt)
-                    .to_std()
-                    .unwrap_or(Duration::from_secs(60 * 60))
-            }
-            "daily" => {
-                let next_date = now_dt.date_naive().succ_opt().unwrap();
-                let naive_midnight = next_date.and_hms_opt(0, 0, 0).unwrap();
-                let next_local = match Local.from_local_datetime(&naive_midnight) {
-                    LocalResult::Single(dt) => dt,
-                    LocalResult::Ambiguous(a, b) => a.min(b),
-                    LocalResult::None => now_dt + chrono::Duration::hours(24),
-                };
-                (next_local - now_dt)
-                    .to_std()
-                    .unwrap_or(Duration::from_secs(24 * 60 * 60))
-            }
-            "*:0/10" => {
-                let m = now_dt.minute();
-                let add = 10 - (m % 10);
-                let next = now_dt.with_second(0).unwrap().with_nanosecond(0).unwrap()
-                    + chrono::Duration::minutes(add as i64);
-                (next - now_dt).to_std().unwrap_or(Duration::from_secs(600))
-            }
-            other => {
-                // Reject unsupported calendars explicitly
-                bail!("unsupported calendar expression: {}", other);
-            }
-        });
-    }
-    Ok(Duration::from_secs(0))
-}
+pub use crate::schedule::{compute_wait, validate_schedule_windows};
 
 fn sleep_minimum(pair: &Arc<(Mutex<bool>, Condvar)>, dur: Duration) -> Result<bool> {
     let step = Duration::from_millis(200);
@@ -426,13 +352,8 @@ fn do_sync_once_unattended(
     if dek.len() != 32 {
         bail!("unexpected DEK length");
     }
-    let token = crate::vault::unlock_provider_with_dek(paths, &dek, cfg.provider.clone())
+    let token = crate::vault::unlock_provider_with_dek(paths, &dek, cfg.provider)
         .context("unlock token")?;
-    let provider = rt
-        .block_on(async {
-            tokio::time::timeout(Duration::from_secs(10), build_active_provider(cfg, &token)).await
-        })
-        .context("provider build timeout")??;
     // Resolve public IP and perform sync
     let consensus = PublicIpConsensus::default();
     let ip = rt
@@ -440,51 +361,16 @@ fn do_sync_once_unattended(
             tokio::time::timeout(Duration::from_secs(10), consensus.resolve()).await
         })
         .context("public ip resolve timeout")??;
-    let action = rt
+    let outcome = rt
         .block_on(async {
-            tokio::time::timeout(Duration::from_secs(10), provider.plan_sync_action(cfg, ip)).await
+            tokio::time::timeout(
+                Duration::from_secs(25),
+                sync_record(cfg, &token, ip, SyncMode::Apply),
+            )
+            .await
         })
-        .context("plan action timeout")??;
-    match action {
-        crate::dnsclient::DnsAction::Noop(cur) => {
-            info!("No change needed: {} -> {}", cfg.record_fqdn(), cur);
-        }
-        crate::dnsclient::DnsAction::Create { name, ttl } => {
-            rt.block_on(async {
-                tokio::time::timeout(
-                    Duration::from_secs(15),
-                    provider.create_a_record(cfg, name, ip, ttl),
-                )
-                .await
-            })
-            .context("create record timeout")??;
-            info!("Created A {} = {} (ttl={})", cfg.record_fqdn(), ip, ttl);
-        }
-        crate::dnsclient::DnsAction::Update {
-            record_id,
-            ttl,
-            prev,
-        } => {
-            rt.block_on(async {
-                tokio::time::timeout(
-                    Duration::from_secs(15),
-                    provider.update_a_record(cfg, record_id, ip, ttl),
-                )
-                .await
-            })
-            .context("update record timeout")??;
-            info!(
-                "Updated A {}: {} -> {} (ttl={})",
-                cfg.record_fqdn(),
-                prev,
-                ip,
-                ttl
-            );
-        }
-        crate::dnsclient::DnsAction::Ambiguous { reason } => {
-            bail!("Refusing to modify records due to ambiguity: {reason}");
-        }
-    }
+        .context("sync timeout")??;
+    info!("{outcome}");
     Ok(())
 }
 

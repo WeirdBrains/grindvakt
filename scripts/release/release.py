@@ -9,6 +9,10 @@
 # - Updates Cargo.toml [package] version, the root package entry in Cargo.lock,
 #   the pubspec.yaml version, and the version link in lib/app.dart, then runs gates:
 #   fmt, clippy, test, build (only on non-dry-run new releases).
+# - Lockstep with grindvakt-core: app vX.Y.Z depends on grindvakt-core "=X.Y.Z" from crates.io.
+#   The script pins that requirement, refreshes Cargo.lock to it, and refuses to release (or
+#   resume) unless grindvakt-core X.Y.Z is published, not yanked, and its crates.io checksum
+#   equals the one in Cargo.lock. Release grindvakt-core X.Y.Z first (its scripts/release.py).
 #
 # NOTE: This script uses only the Python standard library.
 
@@ -21,6 +25,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import json
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +57,124 @@ RE_APP_VERSION_LINK = re.compile(
     r"classes:\s*'btn version'\s*,\s*\[\s*\.text\('v\$appVersion'\)",
     re.S,
 )
+
+
+# grindvakt-core lockstep (see docs/RELEASES.md).
+CORE_CRATE = "grindvakt-core"
+CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
+CRATES_IO_API = "https://crates.io/api/v1/crates/" + CORE_CRATE
+CORE_NON_REGISTRY_KEYS = ("path", "git", "registry", "registry-index", "package", "workspace")
+RE_CORE_REQ_LINE = re.compile(
+    r'^(grindvakt-core\s*=\s*(?:\{[^\n}]*?\bversion\s*=\s*)?")([^"]*)(")', re.M
+)
+
+
+def read_core_requirement(root: Path) -> str:
+    """The grindvakt-core version requirement; dies unless it is a plain crates.io dependency."""
+    data = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
+    dep = data.get("dependencies", {}).get(CORE_CRATE)
+    if dep is None:
+        die(f"Cargo.toml must depend on {CORE_CRATE} (the app uses the published crate)")
+    if isinstance(dep, dict):
+        bad = [k for k in CORE_NON_REGISTRY_KEYS if k in dep]
+        if bad:
+            die(f"{CORE_CRATE} must come from crates.io; remove {', '.join(bad)} from its dependency")
+        req = dep.get("version")
+    else:
+        req = dep
+    if not isinstance(req, str) or not req.strip():
+        die(f"{CORE_CRATE} dependency has no version requirement")
+    for section in ("patch", "replace"):
+        tables = data.get(section, {})
+        if section == "replace":
+            tables = {"": tables}
+        for table in tables.values():
+            if any(k == CORE_CRATE or k.startswith(CORE_CRATE + ":") for k in table):
+                die(f"[{section}] overrides {CORE_CRATE}; releases must use the crates.io crate")
+    return req
+
+
+def core_requirement_version(req: str) -> str | None:
+    """X.Y.Z for an exact requirement "=X.Y.Z", else None."""
+    m = re.fullmatch(r"=\s*(\S+)", req.strip())
+    return m.group(1) if m and is_semver(m.group(1)) else None
+
+
+def set_core_requirement(root: Path, version: str) -> None:
+    path = root / "Cargo.toml"
+    text = path.read_text(encoding="utf-8")
+    new_text, n = RE_CORE_REQ_LINE.subn(r"\g<1>=" + version + r"\g<3>", text, count=1)
+    if n != 1:
+        raise RuntimeError(f"failed to locate the {CORE_CRATE} requirement in Cargo.toml")
+    path.write_text(new_text, encoding="utf-8")
+
+
+def read_core_lock(root: Path) -> dict | None:
+    lock = root / "Cargo.lock"
+    if not lock.is_file():
+        return None
+    pkgs = [p for p in tomllib.loads(lock.read_text(encoding="utf-8")).get("package", []) if p.get("name") == CORE_CRATE]
+    if len(pkgs) != 1:
+        return None
+    return pkgs[0]
+
+
+def crates_io_core_version(version: str) -> dict | None:
+    """crates.io's record for grindvakt-core `version`, or None when it is not published."""
+    req = urllib.request.Request(
+        f"{CRATES_IO_API}/{version}",
+        headers={"User-Agent": "grindvakt release script (https://github.com/WeirdBrains/grindvakt)"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.load(r).get("version")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        die(f"cannot query crates.io for {CORE_CRATE} {version}: HTTP {e.code}")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        die(f"cannot query crates.io for {CORE_CRATE} {version}: {e}")
+    return None
+
+
+def check_core_published(version: str) -> dict:
+    found = crates_io_core_version(version)
+    if not found:
+        die(
+            f"{CORE_CRATE} {version} is not published on crates.io. Versions move in lockstep: "
+            f"release {CORE_CRATE} {version} first (scripts/release.py {version} in that repo), "
+            f"then re-run this script"
+        )
+    if found.get("yanked"):
+        die(f"{CORE_CRATE} {version} is yanked on crates.io; refusing to release against it")
+    if not found.get("checksum"):
+        die(f"crates.io returned no checksum for {CORE_CRATE} {version}")
+    return found
+
+
+def core_lockstep_problem(root: Path, version: str, checksum: str) -> str | None:
+    """Why Cargo.toml/Cargo.lock are not pinned to the published grindvakt-core `version`."""
+    req = read_core_requirement(root)
+    if core_requirement_version(req) != version:
+        return f'Cargo.toml must pin {CORE_CRATE} = "={version}" (found "{req}")'
+    entry = read_core_lock(root)
+    if not entry:
+        return f"Cargo.lock must contain exactly one {CORE_CRATE} package"
+    if entry.get("version") != version:
+        return f"Cargo.lock has {CORE_CRATE} {entry.get('version')}, expected {version}"
+    if entry.get("source") != CRATES_IO_SOURCE:
+        return f"Cargo.lock {CORE_CRATE} must come from crates.io (source {entry.get('source')!r})"
+    if entry.get("checksum") != checksum:
+        return f"Cargo.lock {CORE_CRATE} checksum {entry.get('checksum')} != crates.io {checksum}"
+    return None
+
+
+def verify_core_lockstep(root: Path, version: str) -> None:
+    published = check_core_published(version)
+    problem = core_lockstep_problem(root, version, published["checksum"])
+    if problem:
+        die(problem)
+    info(f"{CORE_CRATE} {version} is published and pinned (checksum {published['checksum']})")
 
 
 def is_semver(s: str) -> bool:
@@ -336,6 +461,7 @@ def main(argv: list[str]) -> int:
             die("resume: pubspec.yaml version does not match Cargo.toml/release (%s)" % new)
         if read_app_dart_version(root) != new:
             die("resume: lib/app.dart version link does not match Cargo.toml/release (%s)" % new)
+        verify_core_lockstep(root, new)
         # Monotonic safety even on resume
         maxv = "0.0.0"
         cp_r = run(["git", "ls-remote", "--tags", "--refs", "origin", "v[0-9]*.[0-9]*.[0-9]*"], capture_output=True, cwd=root)
@@ -395,8 +521,12 @@ def main(argv: list[str]) -> int:
             die("local v%s exists" % new)
         if git_ls_remote(["--tags", "--refs"], f"v{new}", root):
             die("remote v%s exists" % new)
+        # Lockstep: grindvakt-core X.Y.Z must already be on crates.io (checked before any edit).
+        read_core_requirement(root)
+        published = check_core_published(new)
         if args.dry_run:
-            print(f"DRY RUN: would bump to {new} and push v{new} atomically")
+            print(f"DRY RUN: {CORE_CRATE} {new} is published (checksum {published['checksum']})")
+            print(f"DRY RUN: would bump to {new}, pin {CORE_CRATE} = \"={new}\", and push v{new} atomically")
             return 0
         # Prepare backups for full rollback on gate failures
         bakdir = Path(tempfile.mkdtemp(prefix="grindvakt-release-"))
@@ -420,6 +550,19 @@ def main(argv: list[str]) -> int:
                 except Exception:
                     _restore_files_and_index(root, bakdir, index_entries)
                     die("pubspec.yaml or lib/app.dart version update failed")
+                # Pin grindvakt-core to the same version and lock it to the published crate.
+                try:
+                    set_core_requirement(root, new)
+                except Exception:
+                    _restore_files_and_index(root, bakdir, index_entries)
+                    die(f"{CORE_CRATE} requirement update failed")
+                if run(["cargo", "update", "-p", CORE_CRATE, "--precise", new], cwd=root, capture_output=True, check=False).returncode != 0:
+                    _restore_files_and_index(root, bakdir, index_entries)
+                    die(f"cargo update -p {CORE_CRATE} --precise {new} failed")
+                problem = core_lockstep_problem(root, new, published["checksum"])
+                if problem:
+                    _restore_files_and_index(root, bakdir, index_entries)
+                    die(problem)
                 # Gates (short-circuit on first failure)
                 for gate in (
                     ["cargo", "fmt", "--all", "--check"],
