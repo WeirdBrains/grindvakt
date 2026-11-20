@@ -3,7 +3,7 @@
 Key components
 - [grindvakt-core](https://crates.io/crates/grindvakt-core) (`=X.Y.Z`, same version as the app, from crates.io) provides the engine: providers (DNSimple via the official `dnsimple` crate, DigitalOcean over `reqwest`/rustls) behind a `DnsProvider` trait, plan/apply with ambiguity refusal, IPv4/IPv6 discovery by strict majority, the vault format and crypto, the config file format, private file writes, and the single-instance lock. The app adds the CLI, prompts, OS credential stores and services.
 - `src/ip.rs`: `PublicIpConsensus` over `grindvakt_core::ip::discover` (IPv4 only, at least two agreeing sources, non-global answers rejected).
-- `src/provider.rs`, `src/sync.rs`: build the configured provider and run one `grindvakt_core::sync::sync_once` pass (create/update/no-op of the A record, `--dry-run` planning, refusal on duplicates).
+- `src/provider.rs`, `src/sync.rs`: build the configured provider and run one `grindvakt_core::sync::sync_once` pass (or `sync_cname_once` for `record = "cname"`) (create/update/no-op of the A record, `--dry-run` planning, refusal on duplicates).
 - `src/vault.rs`: prompts and unattended credentials around `grindvakt_core::vault`. The vault (`~/.grindvakt/vault.json`) is unchanged from 0.x: provider tokens encrypted with a random 32-byte DEK using XChaCha20-Poly1305 in the canonical JSON shape
   `{ "dnsimple_token": "<string|null>", "digitalocean_token": "<string|null>" }`, with the DEK wrapped by an Argon2id password key and by an HKDF-SHA256 key from a 24-word BIP39 phrase.
 - `src/fsutil.rs`: private writes via `grindvakt_core::fs`. Linux/macOS use owner-only modes (`Privacy::CurrentUser`); Windows uses the service-grade protected DACL (`Privacy::ServiceAccount("Grindvakt")`: SYSTEM, Administrators and `NT SERVICE\\Grindvakt`) because the service reads the data directory. `repair_tree` (via `grindvakt_core::fs::repair_private_tree`) re-ACLs a whole tree; the hidden `grindvakt service repair-acl` runs it from the MSI on upgrade, and `service install` runs it too.
@@ -18,7 +18,7 @@ Key components
 CLI commands
 - `init`: interactive config + vault creation; prints 24-word recovery and requires confirmation echo.
 - Provider selection is part of init; token prompt matches chosen provider. DNSimple-only settings (account id, sandbox) are asked only when DNSimple is selected.
-- `sync`: resolves current IPv4 and updates A record idempotently; supports `--dry-run` and `--no-unattended`.
+- `sync`: resolves current IPv4 and updates A record idempotently (`record = "cname"` instead dispatches to `grindvakt_core::sync::sync_cname_once`, with no IP lookup; the target comes from `[cname]`, a host name or a Weirdnet resource link); supports `--dry-run` and `--no-unattended`.
 - `recover`: rewrap DEK using recovery phrase to set a new password.
 - `change-password`: rewrap DEK using current password.
 - `service print|install|enroll-credential`: print/install units and enroll unattended DEK.

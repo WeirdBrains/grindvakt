@@ -6,6 +6,14 @@ All notable changes to Grindvakt are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- CNAME records: `record = "cname"` with a `[cname]` table keeps a CNAME current instead of the
+  A record. The target is a host name (`target`) or a Weirdnet resource link
+  (`weirdnet_link = "weirdnet-<app>://<name>/<path>"`, whose name becomes the target).
+  `grindvakt init` asks for the record type and its content; `sync` and the Windows service
+  skip the public IP lookup for a CNAME. Existing configs are unchanged.
+
 ## [1.2.0] - 2026-11-12
 
 ### Fixed

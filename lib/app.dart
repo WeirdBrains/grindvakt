@@ -2,6 +2,7 @@ import 'package:jaspr/jaspr.dart';
 import 'package:jaspr/dom.dart';
 
 const String appVersion = '1.2.0';
+
 class Grindvakt extends StatelessComponent {
   const Grindvakt({super.key});
 
@@ -93,8 +94,13 @@ class Grindvakt extends StatelessComponent {
           ),
           _feature(
             'DNSimple and DigitalOcean',
-            'Create/update/no‑op A records, with pagination and idempotency by default. '
+            'Create/update/no‑op A or CNAME records, with pagination and idempotency by default. '
                 'Duplicate records are never guessed at.',
+          ),
+          _feature(
+            'CNAME from a Weirdnet link',
+            'Set record = "cname" and give it a host name or a weirdnet-<app>://<name>/<path> '
+                'link: the link\'s name becomes the CNAME target, re-read on every run.',
           ),
           _feature(
             'grindvakt-core library',
@@ -161,7 +167,9 @@ class Grindvakt extends StatelessComponent {
             ]),
           ]),
           p([
-            .text('The Windows MSI registers the service and puts grindvakt on the PATH. In an elevated shell, run '),
+            .text(
+              'The Windows MSI registers the service and puts grindvakt on the PATH. In an elevated shell, run ',
+            ),
             code([.text('grindvakt init')]),
             .text(', enroll with '),
             code([.text('grindvakt service enroll-credential')]),
@@ -233,6 +241,42 @@ interval_secs = 300
               'Enrollment is required before enabling the timer. Dry‑run reads your public IP and DNS state but does not write.',
             ),
           ]),
+          h3([.text('CNAME instead of A')]),
+          p([
+            .text('To keep a CNAME current, add '),
+            code([.text('record = "cname"')]),
+            .text(' and a '),
+            code([.text('[cname]')]),
+            .text(' table with exactly one of '),
+            code([.text('target')]),
+            .text(' (a host name) or '),
+            code([.text('weirdnet_link')]),
+            .text(
+              ' (a Weirdnet resource link whose name becomes the target). '
+              'Invitation links, user ids and IP addresses are refused, and a CNAME cannot be at the apex. '
+              'No public IP lookup is made. Example:',
+            ),
+          ]),
+          Component.element(
+            tag: 'pre',
+            children: [
+              Component.element(
+                tag: 'code',
+                children: [
+                  .text('''zone = "example.com"
+name = "www"
+record = "cname"
+
+[cname]
+weirdnet_link = "weirdnet-morph://home.example.net/site"
+
+[schedule]
+interval_secs = 300
+'''),
+                ],
+              ),
+            ],
+          ),
         ]),
         section(id: 'security', classes: 'security', [
           h2([.text('Security notes')]),
