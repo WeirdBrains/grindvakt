@@ -6,6 +6,8 @@ All notable changes to Grindvakt are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-20
+
 ### Added
 
 - CNAME records: `record = "cname"` with a `[cname]` table keeps a CNAME current instead of the
