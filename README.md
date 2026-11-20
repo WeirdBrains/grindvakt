@@ -2,7 +2,8 @@
 
 Secure, user-mode DNS updater for DNSimple and DigitalOcean. Rust CLI with:
 - Public IPv4 discovery via multiple HTTPS sources and consensus
-- Idempotent A record create/update/noop on DNSimple (official crate)
+- Idempotent A record create/update/noop on DNSimple (official crate) and DigitalOcean
+- Or keep a CNAME current instead, pointing at a host name or at a Weirdnet link (`record = "cname"`, see below)
 - Local encrypted vault under `~/.grindvakt` with password unlock and 24‑word recovery
 - systemd --user oneshot service + configurable timer (no root/system units)
 - macOS launchd per-user agent (no autoload; install via CLI). Apple Silicon Macs only; Intel Macs are not supported
@@ -23,6 +24,20 @@ Quick start (development)
   - Build: `cargo build --release`
   - Test: `cargo test` (heavy; run locally on a build host per notes below)
   - Cleanup after each run: `rm -rf \"$CARGO_TARGET_DIR\"`
+
+CNAME records and Weirdnet links
+- By default Grindvakt keeps one A record at your public IPv4 address. Set `record = "cname"` in `config.toml` (or answer `cname` to the record type prompt in `grindvakt init`) to keep a CNAME instead; `grindvakt sync` then needs no public IP lookup.
+- The `[cname]` table takes exactly one of `target` (a host name) or `weirdnet_link` (a `weirdnet-<app>://<name>/<path>` resource link, whose `<name>` becomes the CNAME target):
+  ```toml
+  zone = "example.net"
+  name = "www"
+  record = "cname"
+
+  [cname]
+  weirdnet_link = "weirdnet-morph://home.example.com/site"
+  ```
+- Only resource links on a first-party `weirdnet-<app>` scheme with a full DNS host name are accepted. Invitation (`join/`, `answer/`) links, user ids, IP addresses, ports and the bare `weirdnet://` scheme are refused with an error that never repeats an invitation code. Nothing is looked up: the target is the link's name, re-read on every run, so editing the link retargets the record.
+- A CNAME cannot be at the zone apex and must be the only record at its name; Grindvakt refuses (and changes nothing) when other records are there.
 
 Initialize local config and vault
 - `grindvakt init` (prompts for provider selection, that provider's API token, password, and emits a one-time 24-word recovery phrase — record it securely).

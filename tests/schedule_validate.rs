@@ -3,6 +3,8 @@ use grindvakt::schedule::validate_schedule_windows;
 
 fn cfg_with(calendar: Option<&str>, interval: Option<u64>) -> AppConfig {
     AppConfig {
+        record: Default::default(),
+        cname: None,
         schedule: Schedule {
             calendar: calendar.map(|s| s.to_string()),
             interval_secs: interval,

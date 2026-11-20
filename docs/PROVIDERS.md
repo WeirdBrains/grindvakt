@@ -30,3 +30,7 @@ Security
 - Vault password and recovery phrase protect the DEK. Recovery rewraps the password without changing tokens.
 - Unattended credential (optional) seals the DEK to the machine TPM2 via `systemd-creds`.
 
+
+CNAME records (`record = "cname"`)
+- Both providers support the CNAME the same way (DigitalOcean gets the trailing dot it requires, DNSimple the bare name). The planner refuses a CNAME where other records exist, and an A/AAAA/TXT record where a CNAME exists; nothing is deleted.
+- The target comes from `[cname]` in `config.toml`: `target = "home.example.com"`, or `weirdnet_link = "weirdnet-<app>://home.example.com/path"` (the link's host name is the target). The links are parsed by the `weirdnet-schemes` crate; see `grindvakt-core` for the rules.

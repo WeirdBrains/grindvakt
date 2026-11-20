@@ -5,7 +5,9 @@
 //! OS credential stores (systemd-creds with TPM2, the macOS Keychain, Windows DPAPI) that
 //! hold the data key for unattended runs.
 
-use crate::config::{AppConfig, ConfigPaths, Provider, write_config_atomic};
+use crate::config::{
+    AppConfig, CnameConfig, ConfigPaths, Provider, RecordType, normalize_fqdn, write_config_atomic,
+};
 #[cfg(target_os = "windows")]
 use crate::fsutil::atomic_write_0600;
 use crate::fsutil::{PRIVACY, ensure_dir_0700};
@@ -112,6 +114,31 @@ fn save_vault(path: &Path, vault: &Vault) -> Result<()> {
 }
 
 /// Prompts for the password and unwraps the data key.
+/// Asks for a CNAME's content until the core accepts it: a host name, or a
+/// `weirdnet-<app>://<name>/<path>` link (anything with `://`).
+fn prompt_cname_content(seed: Option<&CnameConfig>) -> Result<CnameConfig> {
+    let seed = seed
+        .and_then(|c| c.weirdnet_link.clone().or_else(|| c.target.clone()))
+        .unwrap_or_default();
+    loop {
+        let inp = prompt_string_default(
+            "CNAME target: a host name, or a weirdnet-<app>://<name>/<path> link",
+            &seed,
+        )?;
+        let inp = inp.trim().to_string();
+        let mut c = CnameConfig::default();
+        if inp.contains("://") {
+            c.weirdnet_link = Some(inp);
+        } else {
+            c.target = Some(inp);
+        }
+        match c.source().and_then(|s| s.target()) {
+            Ok(_) => return Ok(c),
+            Err(e) => eprintln!("{e}"),
+        }
+    }
+}
+
 fn unlock_with_prompt(vault: &Vault, prompt: &str) -> Result<Dek> {
     let pwd = prompt_secret(prompt)?;
     vault
@@ -178,6 +205,33 @@ impl<'a> VaultInitFlow<'a> {
             }
             break n;
         };
+        // Record type and, for a CNAME, where its content comes from
+        loop {
+            let seed = cfg.record.to_string();
+            let inp = prompt_string_default("Record type (a|cname)", &seed)?;
+            let t = if inp.trim().is_empty() { seed } else { inp };
+            match t.parse::<RecordType>() {
+                Ok(RecordType::A) => {
+                    cfg.record = RecordType::A;
+                    cfg.cname = None;
+                    break;
+                }
+                Ok(RecordType::Cname) => {
+                    if normalize_fqdn(&cfg.zone, &cfg.name)
+                        .eq_ignore_ascii_case(cfg.zone.trim_end_matches('.'))
+                    {
+                        eprintln!(
+                            "A CNAME cannot be at the zone apex; choose A, or go back and set a name such as 'www'."
+                        );
+                        continue;
+                    }
+                    cfg.record = RecordType::Cname;
+                    cfg.cname = Some(prompt_cname_content(cfg.cname.as_ref())?);
+                    break;
+                }
+                Err(e) => eprintln!("{e}"),
+            }
+        }
         // TTL
         cfg.ttl = prompt_u32_default("TTL seconds (>=60)", cfg.ttl, 60)?;
         // Select provider before DNSimple-only prompts
@@ -268,6 +322,18 @@ impl<'a> VaultInitFlow<'a> {
         println!("\nAbout to write config:");
         println!("  Zone: {}", cfg.zone);
         println!("  Name: {}", cfg.name);
+        match (&cfg.cname, cfg.record) {
+            (Some(c), RecordType::Cname) => {
+                println!("  Record: CNAME");
+                if let Some(t) = &c.target {
+                    println!("  Target: {t}");
+                }
+                if let Some(l) = &c.weirdnet_link {
+                    println!("  Weirdnet link: {l}");
+                }
+            }
+            _ => println!("  Record: A (public IPv4)"),
+        }
         println!("  Provider: {}", cfg.provider);
         println!("  TTL: {}", cfg.ttl);
         println!(

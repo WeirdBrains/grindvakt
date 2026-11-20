@@ -6,6 +6,8 @@ use std::time::{Duration, SystemTime};
 #[test]
 fn compute_wait_interval_min() {
     let cfg = AppConfig {
+        record: Default::default(),
+        cname: None,
         provider: Provider::Dnsimple,
         account_id: None,
         zone: "example.com".into(),
