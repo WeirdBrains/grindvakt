@@ -2,7 +2,7 @@
 
 use crate::config::{self, AppConfig, ConfigPaths};
 use crate::ip::PublicIpConsensus;
-use crate::sync::{SyncMode, sync_record};
+use crate::sync::{SyncMode, sync_cname, sync_record};
 use anyhow::{Context, Result, bail};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -435,23 +435,39 @@ fn do_sync_once_unattended(
     }
     let token = crate::vault::unlock_provider_with_dek(paths, &dek, cfg.provider)
         .context("unlock token")?;
-    // Resolve public IP and perform sync
-    let consensus = PublicIpConsensus::default();
-    let ip = rt
-        .block_on(async {
-            tokio::time::timeout(Duration::from_secs(10), consensus.resolve()).await
-        })
-        .context("public ip resolve timeout")??;
-    let outcome = rt
-        .block_on(async {
-            tokio::time::timeout(
-                Duration::from_secs(25),
-                sync_record(cfg, &token, ip, SyncMode::Apply),
-            )
-            .await
-        })
-        .context("sync timeout")??;
-    info!("{outcome}");
+    match cfg.record {
+        crate::config::RecordType::A => {
+            // Resolve public IP and perform sync
+            let consensus = PublicIpConsensus::default();
+            let ip = rt
+                .block_on(async {
+                    tokio::time::timeout(Duration::from_secs(10), consensus.resolve()).await
+                })
+                .context("public ip resolve timeout")??;
+            let outcome = rt
+                .block_on(async {
+                    tokio::time::timeout(
+                        Duration::from_secs(25),
+                        sync_record(cfg, &token, ip, SyncMode::Apply),
+                    )
+                    .await
+                })
+                .context("sync timeout")??;
+            info!("{outcome}");
+        }
+        crate::config::RecordType::Cname => {
+            let outcome = rt
+                .block_on(async {
+                    tokio::time::timeout(
+                        Duration::from_secs(25),
+                        sync_cname(cfg, &token, SyncMode::Apply),
+                    )
+                    .await
+                })
+                .context("sync timeout")??;
+            info!("{outcome}");
+        }
+    }
     Ok(())
 }
 

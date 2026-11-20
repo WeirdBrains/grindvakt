@@ -6,6 +6,8 @@ use std::path::PathBuf;
 #[test]
 fn render_timer_interval() {
     let cfg = AppConfig {
+        record: Default::default(),
+        cname: None,
         provider: Provider::Dnsimple,
         account_id: None,
         zone: "example.com".into(),
@@ -37,6 +39,8 @@ fn render_timer_interval() {
 #[test]
 fn render_timer_calendar() {
     let cfg = AppConfig {
+        record: Default::default(),
+        cname: None,
         provider: Provider::Dnsimple,
         account_id: None,
         zone: "example.com".into(),

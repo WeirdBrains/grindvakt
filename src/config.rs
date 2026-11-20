@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use crate::fsutil::{PRIVACY, ensure_dir_0700};
 
-pub use grindvakt_core::config::{AppConfig, Provider, Schedule, normalize_fqdn};
+pub use grindvakt_core::config::{
+    AppConfig, CnameConfig, Provider, RecordType, Schedule, normalize_fqdn,
+};
 
 #[derive(Debug, Clone)]
 pub struct ConfigPaths {

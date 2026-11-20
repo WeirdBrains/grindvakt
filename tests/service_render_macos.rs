@@ -6,6 +6,8 @@ mod macos_render_tests {
     #[test]
     fn render_launchd_interval() {
         let cfg = AppConfig {
+            record: Default::default(),
+            cname: None,
             provider: Provider::Dnsimple,
             account_id: None,
             zone: "example.com".into(),
@@ -44,6 +46,8 @@ mod macos_render_tests {
     #[test]
     fn render_launchd_calendar_hourly_calendar_interval() {
         let cfg = AppConfig {
+            record: Default::default(),
+            cname: None,
             provider: Provider::Digitalocean,
             account_id: None,
             zone: "example.com".into(),
@@ -73,6 +77,8 @@ mod macos_calendar_array_tests {
     #[test]
     fn render_launchd_calendar_every_ten_minutes_array() {
         let cfg = AppConfig {
+            record: Default::default(),
+            cname: None,
             provider: Provider::Dnsimple,
             account_id: None,
             zone: "example.com".into(),

@@ -1,7 +1,7 @@
-use crate::config::{self, AppConfig, ConfigPaths, Provider};
+use crate::config::{self, AppConfig, ConfigPaths, Provider, RecordType};
 use crate::ip::PublicIpConsensus;
 use crate::service::InstallUnits;
-use crate::sync::{SyncMode, sync_record};
+use crate::sync::{SyncMode, sync_cname, sync_record};
 use crate::vault::{
     ChangePasswordFlow, CredentialEnrollment, RecoverFlow, VaultInitFlow,
     set_provider_token_interactive, tokens_status_interactive,
@@ -32,7 +32,7 @@ pub enum Command {
     },
     /// Interactively create initial config and encrypted vault
     Init(Init),
-    /// Sync A record to current public IPv4 (idempotent). Never writes with --dry-run
+    /// Sync the A record to the current public IPv4, or the CNAME record to its configured target (idempotent). Never writes with --dry-run
     Sync(Sync),
     /// Use 24-word recovery phrase to reset password (rewrap DEK, no token change)
     Recover(Recover),
@@ -122,17 +122,27 @@ impl Sync {
         let token = unlock_token_for_provider_interactive(ctx, cfg.provider).await?;
         // Check the provider settings before asking the network for the public IP.
         crate::provider::build_active_provider(&cfg, &token)?;
-        let consensus = PublicIpConsensus::default();
-        let ip = consensus.resolve().await.context("resolve public IPv4")?;
         let mode = if self.dry_run {
             SyncMode::DryRun
         } else {
             SyncMode::Apply
         };
-        let outcome = sync_record(&cfg, &token, ip, mode)
-            .await
-            .context("sync dns record")?;
-        info!("{outcome}");
+        match cfg.record {
+            RecordType::A => {
+                let consensus = PublicIpConsensus::default();
+                let ip = consensus.resolve().await.context("resolve public IPv4")?;
+                let outcome = sync_record(&cfg, &token, ip, mode)
+                    .await
+                    .context("sync dns record")?;
+                info!("{outcome}");
+            }
+            RecordType::Cname => {
+                let outcome = sync_cname(&cfg, &token, mode)
+                    .await
+                    .context("sync dns record")?;
+                info!("{outcome}");
+            }
+        }
         Ok(())
     }
 }
